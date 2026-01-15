@@ -1,6 +1,22 @@
-# CyberArk Security Audit Suite v4.0
+# CyberArk Security Audit Suite v4.2 - Red Team Edition
 
-A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. This tool performs extensive security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, and host security assessments.
+A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. **Designed for offensive security professionals, red teamers, and penetration testers.**
+
+This tool performs extensive security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur).
+
+## What's New in v4.2 (Red Team Edition)
+
+| Feature | Description |
+|---------|-------------|
+| **OPSEC Mode** | Stealth scanning with configurable delays, jitter, and reduced detection footprint |
+| **Proxy Support** | Route all traffic through Burp Suite, ZAP, or other intercepting proxies |
+| **Timing Attacks** | Detect user enumeration and blind injection via response timing analysis |
+| **JWT Security** | Test for none algorithm bypass, key confusion, weak signing algorithms |
+| **WebSocket Testing** | Discover real-time endpoints and test for Cross-Site WebSocket Hijacking |
+| **WAF Evasion** | Test encoding bypasses, HTTP Parameter Pollution, request smuggling |
+| **User-Agent Rotation** | Randomized or custom User-Agent strings to evade fingerprinting |
+| **Quiet Mode** | Reduced console output for automation and scripting |
+| **Credential Security** | Secure handling with memory cleanup after use |
 
 ## Table of Contents
 
@@ -189,8 +205,8 @@ Windows host hardening checks requiring local execution:
 | API Security | API1 - API5 | REST API security testing |
 | Host Security | HOST1 - HOST5 | Windows host hardening checks |
 | **New in v4.0** | | |
-| Machine Identity | MID1 - MID6 | Service account and AppID security |
-| Secrets Management | SEC1 - SEC8 | Credential Provider/CCP security |
+| Machine Identity | MID1 - MID9 | Service account, AppID, and AIM Provider security |
+| Secrets Management | SEC1 - SEC14 | Credential Provider/CCP and Conjur security |
 | Zero Standing Privileges | ZSP1 - ZSP5 | JIT access and privilege assessment |
 | Identity Governance | IGA1 - IGA8 | Lifecycle and permission management |
 | EPM Integration | EPM1 - EPM6 | Endpoint Privilege Manager checks |
@@ -198,6 +214,14 @@ Windows host hardening checks requiring local execution:
 | Disaster Recovery | DR1 - DR5 | HA and DR configuration |
 | Compliance Mapping | COMP1 - COMP4 | NIST, SOC2, PCI-DSS alignment |
 | Audit Logging | AUD1 - AUD4 | SIEM and logging validation |
+| **New in v4.1 (CyberArk Tools Integration)** | | |
+| AD Security (zBang) | AD1 - AD7 | Shadow admins, Skeleton Key, SID History, SPNs, Kerberos delegation |
+| Server Hardening (CYBRHardeningCheck) | HARD1 - HARD8 | Server roles, audit policy, RDP, registry, filesystem |
+| Vault Hardening | VAULT1 - VAULT6 | NIC hardening, static IP, domain membership, firewall, certificates |
+| PSM Hardening | PSMH1 - PSMH10 | AppLocker, RDP users, drives hidden, RDS, SMB |
+| PVWA Hardening | PVWAH1 - PVWAH8 | WebDAV, IIS config, app pool, MIME types, cryptography |
+| CPM Hardening | CPMH1 - CPMH4 | FIPS, DEP, credential files, service accounts |
+| Application Control (Evasor) | APPCTL1 - APPCTL5 | DLL injection/hijacking, AppLocker bypasses |
 
 ### Detailed Check Coverage
 
@@ -367,6 +391,84 @@ Windows host hardening checks requiring local execution:
 - Critical event alerting validation
 - Audit data integrity verification
 
+#### Active Directory Security (AD1 - AD7) - NEW in v4.1 (zBang-inspired)
+*Requires domain connectivity and -IncludeADChecks parameter*
+- **Shadow Admin Discovery**: Detect accounts with direct ACL permissions on privileged objects
+- **Skeleton Key Detection**: Check for Skeleton Key malware indicators on Domain Controllers
+- **SID History Analysis**: Identify accounts with privileged SID History attributes
+- **Risky SPN Configuration**: Find user accounts with SPNs (Kerberoasting targets)
+- **Unconstrained Delegation**: Discover accounts with unconstrained Kerberos delegation
+- **Constrained Delegation with Protocol Transition**: Detect S4U2Self abuse potential
+- **Delegation Privilege Audit**: Comprehensive delegation configuration summary
+
+#### Server Hardening (HARD1 - HARD8) - NEW in v4.1 (CYBRHardeningCheck-inspired)
+*Runs automatically on CyberArk servers*
+- Unnecessary Windows Server roles detection
+- Screen saver configuration validation
+- Advanced audit policy completeness
+- Remote Desktop hardening (NLA, encryption, timeout)
+- Registry permissions on security keys
+- Registry auditing configuration
+- File system permissions on Config directories
+- File system auditing on critical paths
+
+#### Vault Hardening (VAULT1 - VAULT6) - NEW in v4.1
+*Runs automatically on Vault servers*
+- NIC hardening (single NIC, minimal protocols)
+- Static IP configuration (no DHCP)
+- Domain membership check (should be workgroup)
+- Logic Container service account validation
+- Firewall non-standard rules detection
+- Vault server certificate validation
+
+#### PSM Hardening (PSMH1 - PSMH10) - NEW in v4.1
+*Runs automatically on PSM servers*
+- PSM user configuration validation
+- Remote Desktop Users group cleared
+- AppLocker policy enforcement
+- Local drives hidden from sessions
+- IE Developer Tools blocked
+- RDS hardening (clipboard, drive, printer redirection)
+- PSM user access restrictions
+- SMB services hardening
+
+#### PVWA Hardening (PVWAH1 - PVWAH8) - NEW in v4.1
+*Runs automatically on PVWA servers*
+- WebDAV disabled verification
+- Anonymous authentication disabled
+- Application pool configuration
+- MIME types security
+- Cryptography settings (FIPS)
+- Installation location (non-system drive)
+
+#### CPM Hardening (CPMH1 - CPMH4) - NEW in v4.1
+*Runs automatically on CPM servers*
+- FIPS cryptography mode
+- DEP (Data Execution Prevention) configuration
+- Credential file permissions
+- Service account configuration
+
+#### Application Control (APPCTL1 - APPCTL5) - NEW in v4.1 (Evasor-inspired)
+*Requires -IncludeAppControlChecks parameter*
+- **DLL Injection Vulnerability**: Check for processes vulnerable to DLL injection via MavInject
+- **DLL Hijacking Risk**: Identify writable directories in CyberArk paths
+- **Resource Hijacking**: Detect replaceable configuration and script files
+- **AppLocker Bypass Paths**: Check for writable bypass locations
+- **Writable System Paths**: Identify writable paths in system directories
+
+#### Conjur Integration (SEC9 - SEC14) - NEW in v4.1
+*Requires -IncludeConjurChecks and -ConjurUrl parameters*
+- Conjur health check
+- Authenticator configuration (LDAP, OIDC, IAM, K8s)
+- API key rotation policy verification
+- Audit logging configuration
+
+#### AIM Provider Security (MID7 - MID9) - NEW in v4.1
+*Runs automatically on servers with AIM Provider*
+- AIM Provider deployment verification
+- Configuration file security
+- Vault connectivity monitoring
+
 ## Requirements
 
 ### Software Requirements
@@ -498,6 +600,76 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan -SkipCVEChecks
 ```
 
+### New v4.2 Scenarios (Red Team Edition)
+
+```powershell
+# OPSEC Mode - Stealth scanning for red team operations
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OPSECMode -UnauthenticatedOnly
+
+# Route traffic through Burp Suite proxy
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -Proxy "http://127.0.0.1:8080" -IgnoreCertificateErrors
+
+# Advanced timing attack detection
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeTimingAttacks -UnauthenticatedOnly
+
+# Full JWT/OAuth2 security testing
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeJWTTests
+
+# WebSocket endpoint discovery and CSWSH testing
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeWebSocketTests
+
+# WAF evasion testing (encoding bypasses, HPP, smuggling)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeWAFEvasion
+
+# Custom timing with jitter and randomized User-Agent
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -RequestDelay 3 -Jitter 30 -RandomizeUserAgent
+
+# Quiet mode for automation/scripting
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -QuietMode -NoLogo -UnauthenticatedOnly
+
+# Complete red team assessment
+.\CyberArk-Security-Audit.ps1 `
+    -PVWA "https://pvwa.domain.com" `
+    -OPSECMode `
+    -Proxy "http://127.0.0.1:8080" `
+    -IncludeTimingAttacks `
+    -IncludeJWTTests `
+    -IncludeWebSocketTests `
+    -UnauthenticatedOnly
+```
+
+### v4.1 Scenarios (CyberArk Tools Integration)
+
+```powershell
+# AD Security Audit (zBang-inspired) - detect shadow admins, Kerberos issues
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP -IncludeADChecks
+
+# AD Security with specific Domain Controller
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeADChecks -DomainController "dc01.domain.com"
+
+# Full hardening check on CyberArk server (CYBRHardeningCheck-inspired)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://localhost" -AuthType CyberArk
+
+# Application control bypass detection (Evasor-inspired)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeAppControlChecks
+
+# Conjur/Secrets Manager integration check
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeConjurChecks -ConjurUrl "https://conjur.domain.com"
+
+# Comprehensive audit with all v4.1 features
+.\CyberArk-Security-Audit.ps1 `
+    -PVWA "https://pvwa.domain.com" `
+    -AuthType LDAP `
+    -IncludeADChecks `
+    -IncludeAppControlChecks `
+    -IncludeConjurChecks `
+    -ConjurUrl "https://conjur.domain.com" `
+    -ComplianceMapping
+
+# Skip hardening checks (faster scan)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipHardeningChecks
+```
+
 ## Parameters
 
 | Parameter | Required | Default | Description |
@@ -512,15 +684,37 @@ $cred = Get-Credential
 | SkipCVEChecks | No | False | Skip CVE-specific vulnerability testing |
 | SkipAPITests | No | False | Skip API security testing |
 | SkipAuthenticatedChecks | No | False | Skip all Phase 2 authenticated checks |
-| SkipSecretsChecks | No | False | Skip Secrets Management checks (SEC1-SEC8) |
-| SkipMachineIdentity | No | False | Skip Machine Identity checks (MID1-MID6) |
+| SkipSecretsChecks | No | False | Skip Secrets Management checks (SEC1-SEC14) |
+| SkipMachineIdentity | No | False | Skip Machine Identity checks (MID1-MID9) |
 | SkipIGAChecks | No | False | Skip Identity Governance checks (IGA1-IGA8) |
 | SkipCloudChecks | No | False | Skip Cloud Security checks (CLD1-CLD6) |
 | SkipDRChecks | No | False | Skip Disaster Recovery checks (DR1-DR5) |
+| SkipHardeningChecks | No | False | Skip component hardening checks (HARD, VAULT, PSM, PVWA, CPM) |
 | **Mode Parameters** | | | |
 | UnauthenticatedOnly | No | False | Run only Phase 1 (no credentials needed) |
 | IncludeEPMChecks | No | False | Include EPM integration checks |
 | ComplianceMapping | No | False | Generate compliance framework mapping |
+| **New in v4.1 Parameters** | | | |
+| IncludeADChecks | No | False | Enable Active Directory security checks (zBang-inspired) |
+| IncludeAppControlChecks | No | False | Enable application control bypass detection (Evasor-inspired) |
+| IncludeConjurChecks | No | False | Enable Conjur/Secrets Manager integration checks |
+| ConjurUrl | No | - | Conjur server URL for integration checks |
+| DomainController | No | - | Domain controller for AD security queries |
+| **New in v4.2 Parameters (Red Team)** | | | |
+| OPSECMode / Stealth | No | False | Enable OPSEC/stealth mode with delays and reduced noise |
+| Proxy | No | - | Proxy URL for traffic routing (e.g., http://127.0.0.1:8080) |
+| ProxyCredential | No | - | Credentials for authenticated proxy |
+| IgnoreCertificateErrors | No | False | Skip SSL/TLS certificate validation |
+| RequestDelay | No | 0 | Delay between requests in seconds (1-60) |
+| Jitter | No | 0 | Random jitter percentage (1-100) for timing variance |
+| UserAgent | No | - | Custom User-Agent string |
+| RandomizeUserAgent | No | False | Rotate through common User-Agent strings |
+| IncludeTimingAttacks | No | False | Enable timing-based vulnerability detection |
+| IncludeJWTTests | No | False | Enable JWT/OAuth2 security testing |
+| IncludeWebSocketTests | No | False | Enable WebSocket endpoint discovery |
+| IncludeWAFEvasion | No | False | Enable WAF/IDS bypass testing |
+| NoLogo | No | False | Suppress banner display |
+| QuietMode | No | False | Reduce console output (info messages suppressed) |
 | **EPM Parameters** | | | |
 | EPMUrl | No | - | EPM server URL for EPM integration checks |
 | **Other Parameters** | | | |
@@ -717,19 +911,121 @@ If you encounter issues not covered above:
 
 ## References
 
+### CyberArk Documentation
 - [CIS CyberArk PAM Benchmark](https://www.cisecurity.org/benchmark/cyberark)
 - [CyberArk Security Hardening Guide](https://docs.cyberark.com/)
 - [CyberArk Security Bulletins](https://www.cyberark.com/resources/security-bulletins)
+- [CyberArk REST API Documentation](https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Implementing%20Privileged%20Account%20Security%20Web%20Services%20.htm)
+
+### CyberArk Open Source Security Tools (v4.1 Integration Sources)
+- [zBang](https://github.com/cyberark/zBang) - Risk assessment tool for privileged account threats (Shadow Admins, Kerberos, SPNs)
+- [CYBRHardeningCheck](https://github.com/cyberark/CYBRHardeningCheck) - CyberArk component server hardening verification
+- [Evasor](https://github.com/cyberark/Evasor) - Application control bypass detection tool
+- [Conjur](https://github.com/cyberark/conjur) - Secrets management platform
+- [ACLight](https://github.com/cyberark/ACLight) - Shadow Admin discovery (part of zBang)
+- [Ansible Security Automation Collection](https://github.com/cyberark/ansible-security-automation-collection) - CyberArk Ansible integration
+
+### Security Standards
 - [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
 - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
+
+### General
 - [PowerShell Documentation](https://docs.microsoft.com/en-us/powershell/)
-- [CyberArk REST API Documentation](https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Implementing%20Privileged%20Account%20Security%20Web%20Services%20.htm)
 
 ## License
 
 This tool is provided as-is for security assessment purposes. Use responsibly and ethically.
 
 ## Changelog
+
+### Version 4.2 (Red Team Edition)
+Major update with offensive security enhancements for penetration testers and red teamers:
+
+**OPSEC/Stealth Mode:**
+- Configurable request delays with jitter to evade rate limiting and detection
+- Reduced testing noise (disables aggressive checks)
+- Randomized User-Agent rotation
+- Quiet mode for automation
+
+**Proxy Support:**
+- Route all traffic through intercepting proxies (Burp Suite, ZAP, mitmproxy)
+- Authenticated proxy support
+- Certificate validation bypass for testing environments
+
+**Advanced Testing Capabilities:**
+- **Timing Attacks**: Authentication enumeration via response timing, blind SQL injection detection
+- **JWT/OAuth2 Security**: None algorithm bypass, key confusion, weak signing algorithm detection
+- **WebSocket Testing**: Endpoint discovery, Cross-Site WebSocket Hijacking (CSWSH) detection
+- **WAF Evasion**: Encoding bypass testing (URL, Unicode, Base64), HTTP Parameter Pollution, Request Smuggling indicators
+
+**New Parameters:**
+- `-OPSECMode` / `-Stealth`: Enable stealth scanning mode
+- `-Proxy`: Proxy URL for traffic routing
+- `-ProxyCredential`: Authenticated proxy support
+- `-IgnoreCertificateErrors`: Skip certificate validation
+- `-RequestDelay`: Delay between requests (seconds)
+- `-Jitter`: Random timing variance (percentage)
+- `-UserAgent` / `-RandomizeUserAgent`: Custom or rotating User-Agent
+- `-IncludeTimingAttacks`: Enable timing analysis
+- `-IncludeJWTTests`: Enable JWT security testing
+- `-IncludeWebSocketTests`: Enable WebSocket discovery
+- `-IncludeWAFEvasion`: Enable WAF bypass testing
+- `-NoLogo` / `-QuietMode`: Reduced output for automation
+
+**Code Quality:**
+- Secure credential handling with memory cleanup
+- OPSEC-aware web request wrapper
+- Improved error handling and graceful degradation
+
+### Version 4.1
+Major update integrating security checks from CyberArk's open-source security tools:
+
+**CyberArk Tools Integration:**
+- **zBang** (AD Security - AD1-AD7):
+  - Shadow Admin Discovery: Detects accounts with direct ACL permissions bypassing group membership
+  - Skeleton Key Detection: Checks for Skeleton Key malware indicators on Domain Controllers
+  - SID History Analysis: Identifies accounts with privileged SID History attributes
+  - Risky SPN Configuration: Finds privileged accounts with SPNs (Kerberoasting risk)
+  - Kerberos Delegation Audit: Discovers unconstrained and constrained delegation with protocol transition
+
+- **CYBRHardeningCheck** (Server Hardening):
+  - Cross-Component (HARD1-HARD8): Server roles, screen saver, advanced audit policy, RDP hardening, registry/filesystem permissions and auditing
+  - Vault Hardening (VAULT1-VAULT6): NIC hardening, static IP, domain membership, service accounts, firewall rules, certificates
+  - PSM Hardening (PSMH1-PSMH10): AppLocker rules, Remote Desktop Users, drives hidden, IE tools blocked, RDS/SMB hardening
+  - PVWA Hardening (PVWAH1-PVWAH8): WebDAV disabled, anonymous auth, app pool config, MIME types, cryptography
+  - CPM Hardening (CPMH1-CPMH4): FIPS cryptography, DEP configuration, credential files, service accounts
+
+- **Evasor** (Application Control - APPCTL1-APPCTL5):
+  - DLL Injection Vulnerability Detection
+  - DLL Hijacking Risk Assessment
+  - Resource Hijacking Potential
+  - AppLocker Bypass Path Detection
+  - Writable System Path Analysis
+
+- **Conjur** (Enhanced Secrets Management - SEC9-SEC14):
+  - Conjur Health Monitoring
+  - Authenticator Configuration Validation
+  - API Key Rotation Policy Checks
+  - Audit Logging Verification
+
+- **AIM Provider** (Enhanced Machine Identity - MID7-MID9):
+  - AIM Provider Deployment Verification
+  - Configuration Security Assessment
+  - Vault Connectivity Monitoring
+
+**New Parameters:**
+- `-IncludeADChecks`: Enable Active Directory security analysis (zBang-inspired)
+- `-IncludeAppControlChecks`: Enable application control bypass detection (Evasor-inspired)
+- `-IncludeConjurChecks`: Enable Conjur/Secrets Manager integration checks
+- `-ConjurUrl`: Conjur server URL for integration checks
+- `-DomainController`: Domain controller for AD security queries
+- `-SkipHardeningChecks`: Skip component hardening checks
+
+**References:**
+- [zBang](https://github.com/cyberark/zBang): Risk assessment tool for privileged account threats
+- [CYBRHardeningCheck](https://github.com/cyberark/CYBRHardeningCheck): CyberArk component hardening verification
+- [Evasor](https://github.com/cyberark/Evasor): Application control bypass detection
+- [Conjur](https://github.com/cyberark/conjur): Secrets management platform
 
 ### Version 4.0
 Major update with comprehensive identity security and 2025 vulnerability coverage:
