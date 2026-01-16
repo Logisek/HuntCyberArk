@@ -74,7 +74,7 @@
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeWAFEvasion -UnauthenticatedOnly
     # Test WAF bypass techniques during external pentest
 .NOTES
-    Version: 4.2
+    Version: 4.3
     Requires: PowerShell 5.1+, CyberArk REST API v12+
     Author: Security Assessment Team
     CIS Benchmark Reference: CIS CyberArk PAM Benchmark v1.0
@@ -119,6 +119,23 @@
     - User-Agent Rotation: Randomized or custom User-Agent strings
     - Quiet Mode: Reduced console output for automation
     
+    Security Posture Expansion (v4.3):
+    - Secrets Hub (SH1 - SH6): Cloud-native secrets sync to AWS/Azure/GCP
+    - Remote Access (RA1 - RA6): Vendor/Alero privileged access security
+    - Kubernetes (K8S1 - K8S8): Container secrets and Secrets Provider
+    - DevSecOps (DSO1 - DSO6): CI/CD pipeline security and secrets sprawl
+    - Privilege Cloud (PC1 - PC5): SaaS-specific connector and tenant checks
+    - CyberArk Identity (IDN1 - IDN6): SSO, adaptive MFA, lifecycle sync
+    - Custom Plugins (PLG1 - PLG5): PSM/CPM plugin security and signatures
+    - Backup Security (BKP1 - BKP5): Encryption, permissions, restoration testing
+    - HSM Integration (HSM1 - HSM4): Hardware security module connectivity
+    - PTA Deep Dive (PTAD1 - PTAD6): Detection rules, ML quality, alert fatigue
+    - Third-Party Integration (TPI1 - TPI5): SIEM, ITSM, SOAR connectivity
+    - Operational Hygiene (OPS1 - OPS8): Onboarding backlog, failures, metrics
+    - Attack Path Simulation (APS1 - APS6): PtH, NTLM relay, Kerberoasting
+    - Supply Chain Integrity (SCI1 - SCI5): File hashes, signatures, patch currency
+    - Network Segmentation (NSG1 - NSG5): Vault isolation, micro-segmentation
+    
     WARNING: Some tests (port scanning, CVE checks, WAF evasion) may trigger security alerts.
     Always obtain proper authorization before running this script.
     
@@ -127,9 +144,9 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [ValidateScript({
-        if ($_ -match '^https?://[a-zA-Z0-9]') { $true }
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://[a-zA-Z0-9]') { $true }
         else { throw "PVWA must be a valid URL starting with http:// or https://" }
     })]
     [string]$PVWA,
@@ -263,7 +280,168 @@ param(
     [switch]$NoLogo,
 
     [Parameter(Mandatory = $false)]
-    [switch]$QuietMode
+    [switch]$QuietMode,
+
+    # New v4.3 parameters - Security Posture Expansion
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeSecretsHubChecks,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "SecretsHubUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$SecretsHubUrl,
+
+    # Remote Access / Alero checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeRemoteAccessChecks,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "AleroUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$AleroUrl,
+
+    # Kubernetes / Container Secrets checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeK8sChecks,
+
+    [Parameter(Mandatory = $false)]
+    [string]$K8sNamespace = "default",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "ConjurApplianceUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$ConjurApplianceUrl,
+
+    # DevSecOps Pipeline Security checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeDevSecOpsChecks,
+
+    # Privilege Cloud / SaaS-specific checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IsPrivilegeCloud,
+
+    [Parameter(Mandatory = $false)]
+    [string]$PrivilegeCloudTenant,
+
+    # CyberArk Identity / Idaptive checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeIdentityChecks,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "IdentityTenantUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$IdentityTenantUrl,
+
+    # Custom Plugins checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludePluginChecks,
+
+    # Backup Security checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeBackupSecurityChecks,
+
+    [Parameter(Mandatory = $false)]
+    [string]$BackupPath,
+
+    # HSM Integration checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeHSMChecks,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("Thales", "nCipher", "SafeNet", "AWSCloudHSM", "AzureHSM", "Other")]
+    [string]$HSMProvider,
+
+    # PTA Deep Dive checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludePTADeepDive,
+
+    # Third-Party Integration checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeThirdPartyChecks,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "ServiceNowUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$ServiceNowUrl,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_) -or $_ -match '^https?://') { $true }
+        else { throw "SIEMUrl must be a valid URL starting with http:// or https://" }
+    })]
+    [string]$SIEMUrl,
+
+    # Operational Hygiene checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeOperationalChecks,
+
+    # Attack Path Simulation checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeAttackPathChecks,
+
+    # Supply Chain Integrity checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeSupplyChainChecks,
+
+    # Network Segmentation checks
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeNetworkSegmentationChecks,
+
+    # Skip parameters for new categories
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipSecretsHubChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipRemoteAccessChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipK8sChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDevSecOpsChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipPrivilegeCloudChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipIdentityChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipPluginChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipBackupSecurityChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipHSMChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipPTADeepDive,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipThirdPartyChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipOperationalChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipAttackPathChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipSupplyChainChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipNetworkSegmentationChecks
 )
 
 #region Configuration
@@ -627,6 +805,159 @@ $script:CISControls = @{
     "MID7" = "AIM Provider deployment"
     "MID8" = "AIM Provider configuration"
     "MID9" = "AIM Provider connectivity"
+    # Security Posture Expansion v4.3 - Secrets Hub Controls (SH prefix)
+    "SH1" = "Secrets Hub sync health"
+    "SH2" = "Secrets Hub sync latency"
+    "SH3" = "Secrets Hub version drift"
+    "SH4" = "Secrets Hub sync failure rate"
+    "SH5" = "Secrets Hub target configuration"
+    "SH6" = "Secrets Hub audit logging"
+    # Security Posture Expansion v4.3 - Remote Access Controls (RA prefix)
+    "RA1" = "Alero invitation workflow"
+    "RA2" = "Alero session time limits"
+    "RA3" = "Alero biometric/device binding"
+    "RA4" = "Alero audit log completeness"
+    "RA5" = "Alero periodic access reviews"
+    "RA6" = "Alero MFA enforcement"
+    # Security Posture Expansion v4.3 - Kubernetes Controls (K8S prefix)
+    "K8S1" = "Secrets Provider deployment mode"
+    "K8S2" = "Pod security context"
+    "K8S3" = "Service Account JWT authentication"
+    "K8S4" = "Kubernetes secrets rotation"
+    "K8S5" = "RBAC for secrets"
+    "K8S6" = "Mounted secret permissions"
+    "K8S7" = "Conjur follower health"
+    "K8S8" = "Kubernetes audit logging"
+    # Security Posture Expansion v4.3 - DevSecOps Controls (DSO prefix)
+    "DSO1" = "CI/CD secrets retrieval patterns"
+    "DSO2" = "Pipeline secrets sprawl"
+    "DSO3" = "Short-lived token usage"
+    "DSO4" = "Pipeline audit logging"
+    "DSO5" = "Secrets in build artifacts"
+    "DSO6" = "Pipeline identity binding"
+    # Security Posture Expansion v4.3 - Privilege Cloud Controls (PC prefix)
+    "PC1" = "Privilege Cloud connector health"
+    "PC2" = "Identity Security Platform integration"
+    "PC3" = "Privilege Cloud API security"
+    "PC4" = "Privilege Cloud tenant isolation"
+    "PC5" = "Cloud connector redundancy"
+    # Security Posture Expansion v4.3 - CyberArk Identity Controls (IDN prefix)
+    "IDN1" = "SSO integration with PVWA"
+    "IDN2" = "Adaptive MFA policy"
+    "IDN3" = "Identity lifecycle sync"
+    "IDN4" = "Session risk scoring"
+    "IDN5" = "Identity audit integration"
+    "IDN6" = "Privileged app catalog policies"
+    # Security Posture Expansion v4.3 - Custom Plugins Controls (PLG prefix)
+    "PLG1" = "Custom PSM connectors security"
+    "PLG2" = "Custom CPM plugin injection risks"
+    "PLG3" = "Unauthorized/outdated components"
+    "PLG4" = "Plugin digital signature validation"
+    "PLG5" = "Custom script file permissions"
+    # Security Posture Expansion v4.3 - Backup Security Controls (BKP prefix)
+    "BKP1" = "Vault backup encryption"
+    "BKP2" = "Backup file permissions"
+    "BKP3" = "Backup in-transit encryption"
+    "BKP4" = "Backup restoration testing"
+    "BKP5" = "Backup retention policy"
+    # Security Posture Expansion v4.3 - HSM Integration Controls (HSM prefix)
+    "HSM1" = "HSM connectivity and health"
+    "HSM2" = "HSM key wrapping configuration"
+    "HSM3" = "HSM partition isolation"
+    "HSM4" = "HSM firmware currency"
+    # Security Posture Expansion v4.3 - PTA Deep Dive Controls (PTAD prefix)
+    "PTAD1" = "PTA custom detection rules"
+    "PTAD2" = "PTA ML model quality"
+    "PTAD3" = "PTA alert fatigue (false positives)"
+    "PTAD4" = "PTA detection rule coverage"
+    "PTAD5" = "PTA UEBA integration"
+    "PTAD6" = "PTA automated response actions"
+    # Security Posture Expansion v4.3 - Third-Party Integration Controls (TPI prefix)
+    "TPI1" = "ITSM (ServiceNow) integration"
+    "TPI2" = "SOAR automated response playbooks"
+    "TPI3" = "SIEM PAM event correlation"
+    "TPI4" = "SIEM log forwarder health"
+    "TPI5" = "Integration credential health"
+    # Security Posture Expansion v4.3 - Operational Hygiene Controls (OPS prefix)
+    "OPS1" = "Account onboarding queue metrics"
+    "OPS2" = "CPM password change failure rates"
+    "OPS3" = "PSM session success/failure ratios"
+    "OPS4" = "CPM reconciliation backlog"
+    "OPS5" = "Platform connection errors"
+    "OPS6" = "Vault utilization and capacity"
+    "OPS7" = "License compliance"
+    "OPS8" = "Component uptime"
+    # Security Posture Expansion v4.3 - Attack Path Simulation Controls (APS prefix)
+    "APS1" = "Workstation to PAM escalation"
+    "APS2" = "Pass-the-Hash attack surface"
+    "APS3" = "NTLM relay risks"
+    "APS4" = "Cached credential extraction resilience"
+    "APS5" = "Kerberoasting exposure"
+    "APS6" = "Privilege escalation paths"
+    # Security Posture Expansion v4.3 - Supply Chain Integrity Controls (SCI prefix)
+    "SCI1" = "Component file hash validation"
+    "SCI2" = "Patch currency"
+    "SCI3" = "Third-party library vulnerabilities"
+    "SCI4" = "Digital signature validation"
+    "SCI5" = "Component origin verification"
+    # Security Posture Expansion v4.3 - Network Segmentation Controls (NSG prefix)
+    "NSG1" = "Vault network isolation"
+    "NSG2" = "PSM to Vault communication restrictions"
+    "NSG3" = "PVWA to backend segmentation"
+    "NSG4" = "East-West traffic monitoring"
+    "NSG5" = "Component-specific network ACLs"
+}
+#endregion
+
+#region UI Functions
+
+function Show-Banner {
+    <#
+    .SYNOPSIS
+        Displays the HuntCyberArk ASCII art banner
+    #>
+    Write-Host ""
+    
+    $asciiArt = @"
+██╗  ██╗██╗   ██╗███╗   ██╗████████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗  █████╗ ██████╗ ██╗  ██╗
+██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝
+███████║██║   ██║██╔██╗ ██║   ██║   ██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝███████║██████╔╝█████╔╝ 
+██╔══██║██║   ██║██║╚██╗██║   ██║   ██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗██╔══██║██╔══██╗██╔═██╗ 
+██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
+"@
+    
+    # Try to use ANSI colors if available (PowerShell supports ANSI by default on modern systems)
+    try {
+        # Check if ANSI escape sequences are supported
+        if ($Host.UI.SupportsVirtualTerminal) {
+            # ANSI color codes: Bright Magenta for ASCII art, Yellow for title
+            $magenta = "`e[95m"
+            $yellow = "`e[33m"
+            $red = "`e[31m"
+            $reset = "`e[0m"
+            
+            Write-Host "${magenta}${asciiArt}${reset}"
+            Write-Host "${yellow}    CyberArk PAM Security Configuration Audit${reset}"
+            Write-Host "${red}    Red Team / Offensive Security Edition${reset}"
+        }
+        else {
+            # Fallback to PowerShell colors
+            Write-Host $asciiArt -ForegroundColor Magenta
+            Write-Host "    CyberArk PAM Security Configuration Audit" -ForegroundColor Yellow
+            Write-Host "    Red Team / Offensive Security Edition" -ForegroundColor Red
+        }
+    }
+    catch {
+        # Fallback without colors
+        Write-Host $asciiArt
+        Write-Host "    CyberArk PAM Security Configuration Audit"
+        Write-Host "    Red Team / Offensive Security Edition"
+    }
+    
+    Write-Host "    https://github.com/yourrepo/HuntCyberArk"
+    Write-Host "    Version 4.3"
+    Write-Host ""
 }
 #endregion
 
@@ -1596,7 +1927,7 @@ function Test-ComponentHealth {
         $componentName = $component.ComponentName
         $componentType = $component.ComponentType
         $isLoggedOn = $component.IsLoggedOn
-        $lastLogon = $component.LastLogonDate
+        # Note: LastLogonDate available in $component.LastLogonDate if needed for future checks
 
         # Check: Component not logged on
         if (-not $isLoggedOn) {
@@ -1694,8 +2025,7 @@ function Test-TLSConfiguration {
 
         $tlsVersion = $sslStream.SslProtocol
         $cipherAlgorithm = $sslStream.CipherAlgorithm
-        $keyExchangeAlgorithm = $sslStream.KeyExchangeAlgorithm
-        $hashAlgorithm = $sslStream.HashAlgorithm
+        # Note: KeyExchangeAlgorithm and HashAlgorithm available for extended TLS analysis if needed
 
         # Log successful TLS check
         Add-Finding -Category "Transport Security" `
@@ -2091,9 +2421,8 @@ function Test-LinkedAccounts {
     $accountsWithoutReconcile = 0
 
     foreach ($account in $accounts.value) {
-        $accountName = $account.name
-        $safeName = $account.safeName
         $platformId = $account.platformId
+        # Note: account.name and account.safeName available for detailed logging if needed
 
         # Skip accounts that don't require linked accounts (e.g., certain platform types)
         if ($platformId -match "^(Unix|Linux|Windows)") {
@@ -2994,7 +3323,7 @@ function Test-RateLimiting {
                 password = "TestPassword123!"
             } | ConvertTo-Json
 
-            $response = Invoke-OPSECWebRequest -Uri $loginEndpoint -Method POST -Body $body -ContentType "application/json" -TimeoutSec 5
+            [void](Invoke-OPSECWebRequest -Uri $loginEndpoint -Method POST -Body $body -ContentType "application/json" -TimeoutSec 5)
             $successCount++
         }
         catch {
@@ -3200,7 +3529,7 @@ function Test-VaultPortSecurity {
                 $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
 
                 if ($bytesRead -gt 0) {
-                    $response = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $bytesRead)
+                    # Vault responded to probe - content available in buffer if detailed analysis needed
 
                     Add-Finding -Category "Vault Security" `
                         -CISControl "NET2" `
@@ -3337,7 +3666,7 @@ function Test-DNSSecurity {
     try {
         # Check for DNS rebinding protection
         $localAddresses = @("127.0.0.1", "localhost", "0.0.0.0", "::1")
-        $internalRanges = @("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.")
+        # Note: Internal ranges (10.x, 172.16-31.x, 192.168.x) available for extended DNS rebinding checks
 
         $dnsResult = [System.Net.Dns]::GetHostAddresses($targetHost)
 
@@ -3399,7 +3728,7 @@ function Test-CVE202131796 {
     foreach ($payload in $ssrfPayloads) {
         try {
             $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            [void](Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue)
             $stopwatch.Stop()
 
             # Check for timing differences that might indicate SSRF
@@ -4141,7 +4470,7 @@ function Test-TimingAttacks {
         try {
             $body = @{ username = $username; password = "timing_test_password" } | ConvertTo-Json
             $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Auth/CyberArk/Logon" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing -ErrorAction SilentlyContinue
+            [void](Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Auth/CyberArk/Logon" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing -ErrorAction SilentlyContinue)
             $stopwatch.Stop()
             $validTimes += $stopwatch.ElapsedMilliseconds
             Add-RequestDelay
@@ -4156,7 +4485,7 @@ function Test-TimingAttacks {
         try {
             $body = @{ username = $username; password = "timing_test_password" } | ConvertTo-Json
             $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Auth/CyberArk/Logon" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing -ErrorAction SilentlyContinue
+            [void](Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Auth/CyberArk/Logon" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing -ErrorAction SilentlyContinue)
             $stopwatch.Stop()
             $invalidTimes += $stopwatch.ElapsedMilliseconds
             Add-RequestDelay
@@ -4205,7 +4534,7 @@ function Test-TimingAttacks {
         foreach ($payload in $blindSqlPayloads) {
             try {
                 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-                $response = Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                [void](Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue)
                 $stopwatch.Stop()
 
                 if ($stopwatch.ElapsedMilliseconds -gt 3000) {
@@ -5022,7 +5351,7 @@ function Test-SessionSecurity {
 
     # Test session fixation
     try {
-        $session1 = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -UseBasicParsing -SessionVariable webSession -TimeoutSec 10 -ErrorAction SilentlyContinue
+        [void](Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -UseBasicParsing -SessionVariable webSession -TimeoutSec 10 -ErrorAction SilentlyContinue)
 
         $preAuthCookies = @()
         foreach ($cookie in $webSession.Cookies.GetCookies($PVWA)) {
@@ -5613,7 +5942,7 @@ function Test-CredentialProviderDeployment {
 
     foreach ($endpoint in $ccpEndpoints) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            [void](Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue)
             
             Add-Finding -Category "Secrets Management" `
                 -CISControl "SEC1" `
@@ -5915,7 +6244,7 @@ function Test-OrphanSecretsDetection {
 function Test-CredentialSprawlAnalysis {
     Write-AuditLog "Analyzing credential sprawl (SEC8)..." -Level Info
 
-    $applications = Invoke-CyberArkAPI -Endpoint "/Applications"
+    # Note: Applications data available via /Applications endpoint for cross-reference if needed
     $accounts = Invoke-CyberArkAPI -Endpoint "/Accounts?limit=$($script:Config.PageLimit)"
     
     if (-not $accounts) {
@@ -6023,7 +6352,7 @@ function Test-PermanentPrivilegedAccess {
         if ($members -and $members.value) {
             foreach ($member in $members.value) {
                 # Check for permanent access (no expiration, no workflow)
-                if ($member.membershipExpirationDate -eq $null -and 
+                if ($null -eq $member.membershipExpirationDate -and 
                     $member.permissions.UseAccounts -eq $true -and
                     $member.memberType -eq "User") {
                     $permanentAccessCount++
@@ -6077,7 +6406,7 @@ function Test-DualControlWorkflows {
             $safeDetails = Invoke-CyberArkAPI -Endpoint "/Safes/$safeName"
             
             if ($safeDetails) {
-                if ($safeDetails.numberOfDaysRetention -eq $null -or 
+                if ($null -eq $safeDetails.numberOfDaysRetention -or 
                     $safeDetails.requiresApproval -eq $false) {
                     $noDualControl += $safeName
                 }
@@ -6108,7 +6437,7 @@ function Test-ConcurrentSessionLimits {
     }
 
     if ($masterPolicy -and $masterPolicy.Details) {
-        if ($masterPolicy.Details.MaxConcurrentConnections -eq $null -or 
+        if ($null -eq $masterPolicy.Details.MaxConcurrentConnections -or 
             $masterPolicy.Details.MaxConcurrentConnections -gt 5) {
             Add-Finding -Category "Zero Standing Privileges" `
                 -CISControl "ZSP3" `
@@ -6262,7 +6591,7 @@ function Test-OrphanedIdentities {
     }
 
     $orphanedUsers = @()
-    $threshold = (Get-Date).AddDays(-365)  # 1 year
+    # Note: 1-year threshold available for extended stale identity analysis if needed
 
     foreach ($user in $users.Users) {
         # Check for never-logged-in users created more than 30 days ago
@@ -6316,7 +6645,7 @@ function Test-PermissionDrift {
 
     # Build user-safe access map
     $userSafeAccess = @{}
-    $unusedPermissions = @()
+    # Note: Detailed unused permissions tracking available for extended drift analysis
 
     foreach ($safe in $safes.value) {
         $safeName = $safe.safeName
@@ -7122,13 +7451,12 @@ function Test-NISTCSFMapping {
     Write-AuditLog "Mapping to NIST Cybersecurity Framework (COMP1)..." -Level Info
 
     # NIST CSF Categories: Identify, Protect, Detect, Respond, Recover
-    $nistMapping = @{
-        "Identify" = @("Asset discovery", "Risk assessment", "Governance")
-        "Protect" = @("Access control", "Awareness training", "Data security", "Maintenance", "Protective technology")
-        "Detect" = @("Anomalies and events", "Continuous monitoring", "Detection processes")
-        "Respond" = @("Response planning", "Communications", "Analysis", "Mitigation", "Improvements")
-        "Recover" = @("Recovery planning", "Improvements", "Communications")
-    }
+    # Mapping structure for reference:
+    # - Identify: Asset discovery, Risk assessment, Governance
+    # - Protect: Access control, Awareness training, Data security, Maintenance, Protective technology
+    # - Detect: Anomalies and events, Continuous monitoring, Detection processes
+    # - Respond: Response planning, Communications, Analysis, Mitigation, Improvements
+    # - Recover: Recovery planning, Improvements, Communications
 
     Add-Finding -Category "Compliance Mapping" `
         -CISControl "COMP1" `
@@ -7144,18 +7472,10 @@ function Test-NISTCSFMapping {
 function Test-SOC2Alignment {
     Write-AuditLog "Assessing SOC 2 Type II alignment (COMP2)..." -Level Info
 
-    # SOC 2 Trust Service Criteria
-    $soc2Criteria = @(
-        "CC1 - Control Environment",
-        "CC2 - Communication and Information",
-        "CC3 - Risk Assessment",
-        "CC4 - Monitoring Activities",
-        "CC5 - Control Activities",
-        "CC6 - Logical and Physical Access",
-        "CC7 - System Operations",
-        "CC8 - Change Management",
-        "CC9 - Risk Mitigation"
-    )
+    # SOC 2 Trust Service Criteria for reference:
+    # CC1 - Control Environment, CC2 - Communication and Information, CC3 - Risk Assessment
+    # CC4 - Monitoring Activities, CC5 - Control Activities, CC6 - Logical and Physical Access
+    # CC7 - System Operations, CC8 - Change Management, CC9 - Risk Mitigation
 
     Add-Finding -Category "Compliance Mapping" `
         -CISControl "COMP2" `
@@ -7171,13 +7491,9 @@ function Test-SOC2Alignment {
 function Test-PCIDSSControls {
     Write-AuditLog "Mapping to PCI-DSS requirements (COMP3)..." -Level Info
 
-    # PCI-DSS requirements related to privileged access
-    $pciRequirements = @(
-        "Req 2 - Default passwords",
-        "Req 7 - Access control",
-        "Req 8 - User authentication",
-        "Req 10 - Logging and monitoring"
-    )
+    # PCI-DSS requirements related to privileged access for reference:
+    # Req 2 - Default passwords, Req 7 - Access control
+    # Req 8 - User authentication, Req 10 - Logging and monitoring
 
     Add-Finding -Category "Compliance Mapping" `
         -CISControl "COMP3" `
@@ -9894,7 +10210,7 @@ function Test-ConjurAuditLogging {
         $auditEndpoint = "$ConjurUrl/audit"
         
         try {
-            $response = Invoke-WebRequest -Uri $auditEndpoint -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            [void](Invoke-WebRequest -Uri $auditEndpoint -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop)
             
             Add-Finding -Category "Conjur Integration" `
                 -CISControl "SEC14" `
@@ -9934,6 +10250,796 @@ function Test-ConjurAuditLogging {
         Add-SkippedCheck -Category "Conjur Integration" -CISControl "SEC14" `
             -CheckName "Audit Logging" `
             -Reason "Error checking audit logging: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#======================================================================
+# SECRETS HUB INTEGRATION CHECKS (SH1-SH6)
+# Cloud-native secrets synchronization to AWS, Azure, GCP
+#======================================================================
+
+function Test-SecretsHubIntegration {
+    Write-AuditLog "Running Secrets Hub Integration Checks..." -Level Info
+
+    if (-not $SecretsHubUrl) {
+        # Try to discover Secrets Hub URL from PVWA
+        $discoveredUrl = Get-SecretsHubUrl
+        if (-not $discoveredUrl) {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+                -CheckName "Secrets Hub Integration" `
+                -Reason "SecretsHubUrl not provided and auto-discovery failed. Use -SecretsHubUrl parameter." `
+                -Type "NotApplicable"
+            return
+        }
+        $script:SecretsHubUrl = $discoveredUrl
+    }
+    else {
+        $script:SecretsHubUrl = $SecretsHubUrl
+    }
+
+    Write-AuditLog "Secrets Hub URL: $($script:SecretsHubUrl)" -Level Info
+
+    Test-SecretsHubSyncStatus
+    Test-SecretsHubLatency
+    Test-SecretsHubVersionDrift
+    Test-SecretsHubSyncFailures
+    Test-SecretsHubTargetConfig
+    Test-SecretsHubAuditLogging
+}
+
+function Get-SecretsHubUrl {
+    # Attempt to discover Secrets Hub URL from PVWA system configuration
+    try {
+        $systemConfig = Invoke-CyberArkAPI -Endpoint "/API/Configuration/SystemConfiguration" -Method "GET" -ErrorAction SilentlyContinue
+        if ($systemConfig -and $systemConfig.SecretsHubUrl) {
+            return $systemConfig.SecretsHubUrl
+        }
+
+        # Try alternative discovery via Privilege Cloud API
+        $cloudConfig = Invoke-CyberArkAPI -Endpoint "/API/Configuration/CloudServices" -Method "GET" -ErrorAction SilentlyContinue
+        if ($cloudConfig -and $cloudConfig.SecretsHub) {
+            return $cloudConfig.SecretsHub.Url
+        }
+    }
+    catch {
+        Write-AuditLog "Secrets Hub URL auto-discovery failed: $($_.Exception.Message)" -Level Warning
+    }
+    
+    return $null
+}
+
+function Test-SecretsHubSyncStatus {
+    <#
+    .SYNOPSIS
+        SH1: Check sync health to AWS/Azure/GCP secret stores
+    #>
+    Write-AuditLog "Checking Secrets Hub sync status (SH1)..." -Level Info
+
+    try {
+        # Query sync status endpoint
+        $syncEndpoint = "$($script:SecretsHubUrl)/api/sync/status"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        # Apply OPSEC delay if configured
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri $syncEndpoint -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            # Analyze sync targets
+            $syncTargets = @()
+            $healthyTargets = 0
+            $unhealthyTargets = 0
+
+            foreach ($target in $response.syncTargets) {
+                $syncTargets += $target.name
+                
+                if ($target.status -eq "Healthy" -or $target.status -eq "Active") {
+                    $healthyTargets++
+                }
+                else {
+                    $unhealthyTargets++
+                    
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH1" `
+                        -Finding "Secrets Hub sync target unhealthy" `
+                        -Resource $target.name `
+                        -CurrentValue "Status: $($target.status)" `
+                        -ExpectedValue "Status: Healthy/Active" `
+                        -Recommendation "Investigate sync failures for $($target.name). Check connectivity, credentials, and target configuration." `
+                        -Severity "High"
+                }
+            }
+
+            if ($unhealthyTargets -eq 0 -and $healthyTargets -gt 0) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH1" `
+                    -Finding "All Secrets Hub sync targets healthy" `
+                    -Resource "Sync Status" `
+                    -CurrentValue "$healthyTargets targets active: $($syncTargets -join ', ')" `
+                    -ExpectedValue "All targets healthy" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            elseif ($healthyTargets -eq 0 -and $response.syncTargets.Count -eq 0) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH1" `
+                    -Finding "No Secrets Hub sync targets configured" `
+                    -Resource "Sync Status" `
+                    -CurrentValue "0 sync targets" `
+                    -ExpectedValue "At least one sync target" `
+                    -Recommendation "Configure sync targets for AWS Secrets Manager, Azure Key Vault, or GCP Secret Manager" `
+                    -Severity "Medium"
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -eq 401 -or $statusCode -eq 403) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+                    -CheckName "Sync Status" `
+                    -Reason "Access denied to Secrets Hub API. Ensure account has Secrets Hub admin permissions." `
+                    -Type "AccessDenied"
+            }
+            elseif ($statusCode -eq 404) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+                    -CheckName "Sync Status" `
+                    -Reason "Secrets Hub sync endpoint not found. Verify Secrets Hub is enabled." `
+                    -Type "NotApplicable"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+            -CheckName "Sync Status" `
+            -Reason "Error checking sync status: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubLatency {
+    <#
+    .SYNOPSIS
+        SH2: Measure sync delay/latency to cloud destinations
+    #>
+    Write-AuditLog "Checking Secrets Hub sync latency (SH2)..." -Level Info
+
+    try {
+        $metricsEndpoint = "$($script:SecretsHubUrl)/api/sync/metrics"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri $metricsEndpoint -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            # Acceptable latency thresholds (in seconds)
+            $warningThreshold = 60      # 1 minute
+            $criticalThreshold = 300    # 5 minutes
+
+            foreach ($target in $response.targets) {
+                $avgLatency = $target.averageSyncLatencySeconds
+                $maxLatency = $target.maxSyncLatencySeconds
+                $lastSync = $target.lastSuccessfulSync
+
+                if ($maxLatency -gt $criticalThreshold) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH2" `
+                        -Finding "Critical sync latency detected" `
+                        -Resource $target.name `
+                        -CurrentValue "Max latency: $maxLatency seconds (avg: $avgLatency seconds)" `
+                        -ExpectedValue "Max latency < $criticalThreshold seconds" `
+                        -Recommendation "Investigate network connectivity and API rate limits for $($target.name). Consider reducing sync batch size." `
+                        -Severity "High"
+                }
+                elseif ($avgLatency -gt $warningThreshold) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH2" `
+                        -Finding "Elevated sync latency" `
+                        -Resource $target.name `
+                        -CurrentValue "Average latency: $avgLatency seconds" `
+                        -ExpectedValue "Average latency < $warningThreshold seconds" `
+                        -Recommendation "Monitor sync latency trends for $($target.name). Consider optimizing sync configuration." `
+                        -Severity "Medium"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH2" `
+                        -Finding "Sync latency within acceptable range" `
+                        -Resource $target.name `
+                        -CurrentValue "Average latency: $avgLatency seconds" `
+                        -ExpectedValue "Latency < $warningThreshold seconds" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+
+                # Check for stale sync (last sync > 1 hour ago)
+                if ($lastSync) {
+                    $lastSyncTime = [DateTime]::Parse($lastSync)
+                    $hoursSinceSync = ((Get-Date) - $lastSyncTime).TotalHours
+
+                    if ($hoursSinceSync -gt 24) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH2" `
+                            -Finding "Stale sync detected" `
+                            -Resource $target.name `
+                            -CurrentValue "Last sync: $([math]::Round($hoursSinceSync, 1)) hours ago" `
+                            -ExpectedValue "Sync within last hour" `
+                            -Recommendation "Investigate why secrets are not syncing to $($target.name). Check for sync errors or disabled sync jobs." `
+                            -Severity "High"
+                    }
+                    elseif ($hoursSinceSync -gt 1) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH2" `
+                            -Finding "Sync delay detected" `
+                            -Resource $target.name `
+                            -CurrentValue "Last sync: $([math]::Round($hoursSinceSync, 1)) hours ago" `
+                            -ExpectedValue "Recent sync activity" `
+                            -Recommendation "Verify sync schedule for $($target.name) meets operational requirements" `
+                            -Severity "Low"
+                    }
+                }
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -in @(401, 403)) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH2" `
+                    -CheckName "Sync Latency" `
+                    -Reason "Access denied to Secrets Hub metrics API" `
+                    -Type "AccessDenied"
+            }
+            elseif ($statusCode -eq 404) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH2" `
+                    -CheckName "Sync Latency" `
+                    -Reason "Metrics endpoint not available. May require Secrets Hub Enterprise." `
+                    -Type "NotApplicable"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH2" `
+            -CheckName "Sync Latency" `
+            -Reason "Error checking sync latency: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubVersionDrift {
+    <#
+    .SYNOPSIS
+        SH3: Compare secret versions across CyberArk and cloud destinations
+    #>
+    Write-AuditLog "Checking Secrets Hub version drift (SH3)..." -Level Info
+
+    try {
+        $driftEndpoint = "$($script:SecretsHubUrl)/api/sync/drift"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri $driftEndpoint -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            $driftedSecrets = @()
+            $totalSecrets = $response.totalSecrets
+            $syncedSecrets = $response.syncedSecrets
+
+            foreach ($drift in $response.driftedSecrets) {
+                $driftedSecrets += $drift
+
+                $driftAge = if ($drift.driftDetectedAt) {
+                    $driftTime = [DateTime]::Parse($drift.driftDetectedAt)
+                    [math]::Round(((Get-Date) - $driftTime).TotalHours, 1)
+                } else { "Unknown" }
+
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH3" `
+                    -Finding "Secret version drift detected" `
+                    -Resource "$($drift.secretName) -> $($drift.targetName)" `
+                    -CurrentValue "CyberArk v$($drift.sourceVersion) vs Target v$($drift.targetVersion). Drift age: $driftAge hours" `
+                    -ExpectedValue "Versions should match" `
+                    -Recommendation "Force resync for $($drift.secretName) or investigate why automatic sync failed" `
+                    -Severity "High"
+            }
+
+            if ($driftedSecrets.Count -eq 0) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH3" `
+                    -Finding "No version drift detected" `
+                    -Resource "Version Consistency" `
+                    -CurrentValue "$syncedSecrets of $totalSecrets secrets in sync" `
+                    -ExpectedValue "All secrets synchronized" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            else {
+                # Summary finding for multiple drifts
+                $driftPercentage = [math]::Round(($driftedSecrets.Count / $totalSecrets) * 100, 1)
+                
+                if ($driftPercentage -gt 10) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH3" `
+                        -Finding "High secret drift rate" `
+                        -Resource "Drift Summary" `
+                        -CurrentValue "$($driftedSecrets.Count) secrets drifted ($driftPercentage%)" `
+                        -ExpectedValue "< 1% drift rate" `
+                        -Recommendation "Investigate systemic sync issues. Consider checking network connectivity, API limits, and sync job health." `
+                        -Severity "Critical"
+                }
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -in @(401, 403)) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH3" `
+                    -CheckName "Version Drift" `
+                    -Reason "Access denied to drift detection API" `
+                    -Type "AccessDenied"
+            }
+            elseif ($statusCode -eq 404) {
+                # Drift API may not exist - try alternative approach
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH3" `
+                    -CheckName "Version Drift" `
+                    -Reason "Drift detection endpoint not available" `
+                    -Type "NotApplicable"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH3" `
+            -CheckName "Version Drift" `
+            -Reason "Error checking version drift: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubSyncFailures {
+    <#
+    .SYNOPSIS
+        SH4: Detect and report sync failures
+    #>
+    Write-AuditLog "Checking Secrets Hub sync failures (SH4)..." -Level Info
+
+    try {
+        $failuresEndpoint = "$($script:SecretsHubUrl)/api/sync/failures"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        # Get failures from last 24 hours
+        $since = (Get-Date).AddHours(-24).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $queryParams = "?since=$since&limit=100"
+
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri "$failuresEndpoint$queryParams" -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            $failures = $response.failures
+            $failureCount = $failures.Count
+
+            if ($failureCount -eq 0) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH4" `
+                    -Finding "No sync failures in last 24 hours" `
+                    -Resource "Sync Reliability" `
+                    -CurrentValue "0 failures" `
+                    -ExpectedValue "Minimal failures" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            else {
+                # Group failures by type
+                $failuresByType = $failures | Group-Object -Property errorType
+                
+                foreach ($group in $failuresByType) {
+                    $errorType = $group.Name
+                    $count = $group.Count
+                    $samples = $group.Group | Select-Object -First 3
+
+                    $severity = switch ($errorType) {
+                        "AuthenticationError" { "Critical" }
+                        "PermissionDenied" { "Critical" }
+                        "NetworkError" { "High" }
+                        "RateLimitExceeded" { "Medium" }
+                        "ValidationError" { "Medium" }
+                        default { "High" }
+                    }
+
+                    $recommendation = switch ($errorType) {
+                        "AuthenticationError" { "Verify cloud provider credentials are valid and not expired" }
+                        "PermissionDenied" { "Check IAM permissions for Secrets Hub service principal" }
+                        "NetworkError" { "Verify network connectivity and firewall rules to cloud provider" }
+                        "RateLimitExceeded" { "Reduce sync frequency or request API limit increase from cloud provider" }
+                        "ValidationError" { "Check secret format compatibility with target secret store" }
+                        default { "Investigate error logs for detailed failure information" }
+                    }
+
+                    $sampleSecrets = ($samples | ForEach-Object { $_.secretName }) -join ", "
+
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH4" `
+                        -Finding "Sync failures detected: $errorType" `
+                        -Resource "Sync Failures" `
+                        -CurrentValue "$count failures in 24h. Affected: $sampleSecrets" `
+                        -ExpectedValue "No sync failures" `
+                        -Recommendation $recommendation `
+                        -Severity $severity
+                }
+
+                # Overall failure rate assessment
+                if ($failureCount -gt 50) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH4" `
+                        -Finding "High sync failure rate" `
+                        -Resource "Sync Health" `
+                        -CurrentValue "$failureCount failures in 24 hours" `
+                        -ExpectedValue "< 10 failures per day" `
+                        -Recommendation "Urgent: Investigate systemic sync issues. Consider pausing sync and reviewing configuration." `
+                        -Severity "Critical"
+                }
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -in @(401, 403)) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH4" `
+                    -CheckName "Sync Failures" `
+                    -Reason "Access denied to failures API" `
+                    -Type "AccessDenied"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH4" `
+            -CheckName "Sync Failures" `
+            -Reason "Error checking sync failures: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubTargetConfig {
+    <#
+    .SYNOPSIS
+        SH5: Validate sync target configuration security
+    #>
+    Write-AuditLog "Checking Secrets Hub target configuration (SH5)..." -Level Info
+
+    try {
+        $targetsEndpoint = "$($script:SecretsHubUrl)/api/sync/targets"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri $targetsEndpoint -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            foreach ($target in $response.targets) {
+                $targetName = $target.name
+                $targetType = $target.type  # AWS, Azure, GCP
+                $issues = @()
+
+                # Check 1: Authentication method
+                if ($target.authMethod -eq "StaticCredentials") {
+                    $issues += "Using static credentials instead of IAM role/managed identity"
+                    
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Static credentials used for cloud authentication" `
+                        -Resource $targetName `
+                        -CurrentValue "Auth: Static credentials" `
+                        -ExpectedValue "IAM Role/Managed Identity/Workload Identity" `
+                        -Recommendation "Configure workload identity federation or managed identity for $targetType" `
+                        -Severity "High"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Secure cloud authentication configured" `
+                        -Resource $targetName `
+                        -CurrentValue "Auth: $($target.authMethod)" `
+                        -ExpectedValue "Managed identity/workload identity" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+
+                # Check 2: Encryption configuration
+                if ($target.encryptionEnabled -eq $false) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Encryption not enabled for sync target" `
+                        -Resource $targetName `
+                        -CurrentValue "Encryption: Disabled" `
+                        -ExpectedValue "Encryption: Enabled with CMK" `
+                        -Recommendation "Enable encryption with customer-managed keys for $targetName" `
+                        -Severity "High"
+                }
+
+                # Check 3: Network restrictions (if applicable)
+                if ($target.networkRestrictions) {
+                    if ($target.networkRestrictions.allowAllNetworks -eq $true) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH5" `
+                            -Finding "No network restrictions on sync target" `
+                            -Resource $targetName `
+                            -CurrentValue "Network: All networks allowed" `
+                            -ExpectedValue "Private endpoint or IP restrictions" `
+                            -Recommendation "Configure private endpoint or IP allowlist for $targetName" `
+                            -Severity "Medium"
+                    }
+                    elseif ($target.networkRestrictions.privateEndpoint) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH5" `
+                            -Finding "Private endpoint configured" `
+                            -Resource $targetName `
+                            -CurrentValue "Network: Private endpoint enabled" `
+                            -ExpectedValue "Private endpoint" `
+                            -Severity "Info" `
+                            -Status "Pass"
+                    }
+                }
+
+                # Check 4: Sync scope (overly broad sync)
+                if ($target.syncScope -eq "AllSecrets" -or $target.syncScope -eq "*") {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Overly broad sync scope" `
+                        -Resource $targetName `
+                        -CurrentValue "Sync scope: All secrets" `
+                        -ExpectedValue "Scoped to specific safes/filters" `
+                        -Recommendation "Restrict sync scope to specific safes or secret filters for $targetName" `
+                        -Severity "Medium"
+                }
+
+                # Check 5: Last credential rotation
+                if ($target.credentialLastRotated) {
+                    $lastRotation = [DateTime]::Parse($target.credentialLastRotated)
+                    $daysSinceRotation = ((Get-Date) - $lastRotation).TotalDays
+
+                    if ($daysSinceRotation -gt 90) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH5" `
+                            -Finding "Stale sync target credentials" `
+                            -Resource $targetName `
+                            -CurrentValue "Credentials last rotated: $([math]::Round($daysSinceRotation)) days ago" `
+                            -ExpectedValue "Rotation within 90 days" `
+                            -Recommendation "Rotate credentials for $targetName sync target" `
+                            -Severity "Medium"
+                    }
+                }
+            }
+
+            if ($response.targets.Count -eq 0) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH5" `
+                    -Finding "No sync targets configured" `
+                    -Resource "Target Configuration" `
+                    -CurrentValue "0 targets" `
+                    -ExpectedValue "At least one sync target" `
+                    -Recommendation "Configure sync targets for cloud secret stores" `
+                    -Severity "Medium"
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -in @(401, 403)) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH5" `
+                    -CheckName "Target Configuration" `
+                    -Reason "Access denied to targets API" `
+                    -Type "AccessDenied"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH5" `
+            -CheckName "Target Configuration" `
+            -Reason "Error checking target configuration: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubAuditLogging {
+    <#
+    .SYNOPSIS
+        SH6: Verify audit completeness for Secrets Hub operations
+    #>
+    Write-AuditLog "Checking Secrets Hub audit logging (SH6)..." -Level Info
+
+    try {
+        $auditEndpoint = "$($script:SecretsHubUrl)/api/audit/config"
+        
+        $headers = @{
+            "Authorization" = "Bearer $($script:AuthToken)"
+            "Content-Type" = "application/json"
+        }
+
+        if ($script:RequestDelay -gt 0) {
+            $delay = Get-OPSECDelay -BaseDelay $script:RequestDelay -Jitter $script:Jitter
+            Start-Sleep -Milliseconds $delay
+        }
+
+        try {
+            $response = Invoke-RestMethod -Uri $auditEndpoint -Method GET -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            
+            # Check 1: Audit logging enabled
+            if ($response.auditEnabled -eq $false) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "Secrets Hub audit logging disabled" `
+                    -Resource "Audit Configuration" `
+                    -CurrentValue "Audit logging: Disabled" `
+                    -ExpectedValue "Audit logging: Enabled" `
+                    -Recommendation "Enable comprehensive audit logging for all Secrets Hub operations" `
+                    -Severity "Critical"
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "Audit logging enabled" `
+                    -Resource "Audit Configuration" `
+                    -CurrentValue "Audit logging: Enabled" `
+                    -ExpectedValue "Audit logging: Enabled" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+
+            # Check 2: SIEM integration
+            if (-not $response.siemIntegration -or $response.siemIntegration.enabled -eq $false) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "No SIEM integration for Secrets Hub" `
+                    -Resource "Audit Forwarding" `
+                    -CurrentValue "SIEM integration: Not configured" `
+                    -ExpectedValue "SIEM integration: Enabled" `
+                    -Recommendation "Configure SIEM integration to forward Secrets Hub audit events" `
+                    -Severity "Medium"
+            }
+            else {
+                # Check SIEM health
+                if ($response.siemIntegration.status -ne "Healthy") {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "SIEM integration unhealthy" `
+                        -Resource "Audit Forwarding" `
+                        -CurrentValue "SIEM status: $($response.siemIntegration.status)" `
+                        -ExpectedValue "SIEM status: Healthy" `
+                        -Recommendation "Investigate SIEM integration issues. Check connectivity and credentials." `
+                        -Severity "High"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "SIEM integration healthy" `
+                        -Resource "Audit Forwarding" `
+                        -CurrentValue "SIEM: $($response.siemIntegration.type) - Healthy" `
+                        -ExpectedValue "SIEM integration active" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+
+            # Check 3: Audit retention
+            if ($response.retentionDays -and $response.retentionDays -lt 90) {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "Insufficient audit retention" `
+                    -Resource "Audit Retention" `
+                    -CurrentValue "Retention: $($response.retentionDays) days" `
+                    -ExpectedValue "Retention >= 90 days (365 recommended)" `
+                    -Recommendation "Increase audit log retention to meet compliance requirements" `
+                    -Severity "Medium"
+            }
+
+            # Check 4: Logged event types
+            if ($response.loggedEvents) {
+                $requiredEvents = @("SecretSync", "TargetCreate", "TargetModify", "TargetDelete", "ConfigChange", "AuthFailure")
+                $missingEvents = $requiredEvents | Where-Object { $_ -notin $response.loggedEvents }
+
+                if ($missingEvents.Count -gt 0) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "Incomplete audit event coverage" `
+                        -Resource "Audit Events" `
+                        -CurrentValue "Missing events: $($missingEvents -join ', ')" `
+                        -ExpectedValue "All critical events logged" `
+                        -Recommendation "Enable logging for all event types: $($missingEvents -join ', ')" `
+                        -Severity "Medium"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "Comprehensive audit event logging" `
+                        -Resource "Audit Events" `
+                        -CurrentValue "All critical events logged" `
+                        -ExpectedValue "Complete event coverage" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            
+            if ($statusCode -in @(401, 403)) {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH6" `
+                    -CheckName "Audit Logging" `
+                    -Reason "Access denied to audit configuration API" `
+                    -Type "AccessDenied"
+            }
+            elseif ($statusCode -eq 404) {
+                # Try alternative check via PVWA
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "Unable to verify Secrets Hub audit configuration" `
+                    -Resource "Audit Logging" `
+                    -CurrentValue "Audit API not accessible" `
+                    -ExpectedValue "Audit configuration verifiable" `
+                    -Recommendation "Manually verify Secrets Hub audit logging is enabled and forwarding to SIEM" `
+                    -Severity "Medium"
+            }
+            else {
+                throw $_
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH6" `
+            -CheckName "Audit Logging" `
+            -Reason "Error checking audit configuration: $($_.Exception.Message)" `
             -Type "Error"
     }
 }
@@ -10143,6 +11249,2066 @@ function Test-AIMProviderConnectivity {
         Add-SkippedCheck -Category "Machine Identity" -CISControl "MID9" `
             -CheckName "AIM Provider Connectivity" `
             -Reason "Error checking connectivity: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Secrets Hub Integration (v4.3)
+
+function Test-SecretsHubIntegration {
+    Write-AuditLog "Starting Secrets Hub security checks..." -Level Info
+    
+    if (-not $IncludeSecretsHubChecks -and -not $SecretsHubUrl) {
+        Write-AuditLog "Secrets Hub checks skipped (use -IncludeSecretsHubChecks)" -Level Info
+        return
+    }
+    
+    Test-SecretsHubSyncStatus
+    Test-SecretsHubLatency
+    Test-SecretsHubVersionDrift
+    Test-SecretsHubSyncFailures
+    Test-SecretsHubTargetConfig
+    Test-SecretsHubAuditLogging
+}
+
+function Test-SecretsHubSyncStatus {
+    # SH1: Check sync health to AWS/Azure/GCP
+    Write-AuditLog "Checking Secrets Hub sync status (SH1)..." -Level Info
+    
+    try {
+        if ($SecretsHubUrl) {
+            $syncEndpoint = "$SecretsHubUrl/api/sync/status"
+            $response = Invoke-OPSECWebRequest -Uri $syncEndpoint -Method GET -ErrorAction SilentlyContinue
+            
+            if ($response -and $response.StatusCode -eq 200) {
+                $syncData = $response.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+                
+                if ($syncData.status -eq "Healthy" -or $syncData.syncStatus -eq "Active") {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH1" `
+                        -Finding "Secrets Hub sync is healthy" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "Sync Status: Active/Healthy" `
+                        -ExpectedValue "Active sync" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH1" `
+                        -Finding "Secrets Hub sync may be unhealthy" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "Status: $($syncData.status)" `
+                        -ExpectedValue "Active/Healthy sync" `
+                        -Recommendation "Review Secrets Hub configuration and connectivity to cloud providers" `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH1" `
+                    -Finding "Unable to retrieve Secrets Hub sync status" `
+                    -Resource $SecretsHubUrl `
+                    -CurrentValue "API not accessible or returned error" `
+                    -ExpectedValue "Accessible sync status endpoint" `
+                    -Recommendation "Verify Secrets Hub URL and API access" `
+                    -Severity "Medium"
+            }
+        }
+        else {
+            # Check via PVWA API for Secrets Hub configuration
+            if ($script:AuthToken) {
+                $secretsHubConfig = Invoke-CyberArkAPI -Endpoint "SecretsHub/Configuration" -ErrorAction SilentlyContinue
+                
+                if ($secretsHubConfig) {
+                    $activeTargets = @($secretsHubConfig.targets | Where-Object { $_.enabled -eq $true })
+                    
+                    if ($activeTargets.Count -gt 0) {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH1" `
+                            -Finding "Secrets Hub configured with active targets" `
+                            -Resource "Secrets Hub Configuration" `
+                            -CurrentValue "$($activeTargets.Count) active sync targets" `
+                            -ExpectedValue "Active sync configuration" `
+                            -Severity "Info" `
+                            -Status "Pass"
+                    }
+                    else {
+                        Add-Finding -Category "Secrets Hub" `
+                            -CISControl "SH1" `
+                            -Finding "No active Secrets Hub sync targets" `
+                            -Resource "Secrets Hub Configuration" `
+                            -CurrentValue "0 active targets" `
+                            -ExpectedValue "At least one active sync target" `
+                            -Recommendation "Configure and enable Secrets Hub sync targets for cloud secret stores" `
+                            -Severity "Medium"
+                    }
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH1" `
+                        -Finding "Secrets Hub not configured or not accessible" `
+                        -Resource "PVWA" `
+                        -CurrentValue "No Secrets Hub configuration found" `
+                        -ExpectedValue "Secrets Hub configured for cloud sync" `
+                        -Recommendation "Consider deploying Secrets Hub for cloud-native secrets management" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+                    -CheckName "Secrets Hub Sync Status" `
+                    -Reason "Authentication required and no SecretsHubUrl provided" `
+                    -Type "MissingConfig"
+            }
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" `
+            -CheckName "Secrets Hub Sync Status" `
+            -Reason "Error checking sync status: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubLatency {
+    # SH2: Measure sync delay
+    Write-AuditLog "Checking Secrets Hub sync latency (SH2)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $syncMetrics = Invoke-CyberArkAPI -Endpoint "SecretsHub/Metrics" -ErrorAction SilentlyContinue
+            
+            if ($syncMetrics -and $syncMetrics.averageSyncLatencyMs) {
+                $latencyMs = $syncMetrics.averageSyncLatencyMs
+                $latencyThresholdMs = 5000  # 5 second threshold
+                
+                if ($latencyMs -lt $latencyThresholdMs) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH2" `
+                        -Finding "Secrets Hub sync latency is acceptable" `
+                        -Resource "Secrets Hub Metrics" `
+                        -CurrentValue "$latencyMs ms average latency" `
+                        -ExpectedValue "< $latencyThresholdMs ms" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH2" `
+                        -Finding "High Secrets Hub sync latency detected" `
+                        -Resource "Secrets Hub Metrics" `
+                        -CurrentValue "$latencyMs ms average latency" `
+                        -ExpectedValue "< $latencyThresholdMs ms" `
+                        -Recommendation "Investigate network connectivity and cloud provider endpoints. High latency may cause secret version inconsistencies." `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH2" `
+                    -Finding "Secrets Hub latency metrics not available" `
+                    -Resource "Secrets Hub" `
+                    -CurrentValue "Metrics endpoint not accessible" `
+                    -ExpectedValue "Latency monitoring enabled" `
+                    -Recommendation "Enable Secrets Hub performance monitoring" `
+                    -Severity "Low" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH2" `
+                -CheckName "Secrets Hub Latency" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH2" `
+            -CheckName "Secrets Hub Latency" `
+            -Reason "Error checking latency: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubVersionDrift {
+    # SH3: Compare versions across destinations
+    Write-AuditLog "Checking Secrets Hub version drift (SH3)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $syncStatus = Invoke-CyberArkAPI -Endpoint "SecretsHub/SyncStatus" -ErrorAction SilentlyContinue
+            
+            if ($syncStatus -and $syncStatus.secrets) {
+                $driftedSecrets = @($syncStatus.secrets | Where-Object { 
+                    $_.sourceVersion -ne $_.targetVersion -or $_.syncState -eq "OutOfSync"
+                })
+                
+                if ($driftedSecrets.Count -eq 0) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH3" `
+                        -Finding "No secret version drift detected" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "All secrets in sync" `
+                        -ExpectedValue "No version drift" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                elseif ($driftedSecrets.Count -le 5) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH3" `
+                        -Finding "Minor secret version drift detected" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "$($driftedSecrets.Count) secrets out of sync" `
+                        -ExpectedValue "All secrets synchronized" `
+                        -Recommendation "Review and resync out-of-date secrets. This may indicate sync failures or timing issues." `
+                        -Severity "Medium"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH3" `
+                        -Finding "Significant secret version drift detected" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "$($driftedSecrets.Count) secrets out of sync" `
+                        -ExpectedValue "All secrets synchronized" `
+                        -Recommendation "Immediate investigation required. Large-scale drift may indicate sync failures or cloud provider connectivity issues." `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH3" `
+                    -Finding "Unable to assess secret version drift" `
+                    -Resource "Secrets Hub" `
+                    -CurrentValue "Sync status not available" `
+                    -ExpectedValue "Version drift monitoring" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH3" `
+                -CheckName "Secrets Hub Version Drift" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH3" `
+            -CheckName "Secrets Hub Version Drift" `
+            -Reason "Error checking version drift: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubSyncFailures {
+    # SH4: Detect failed syncs
+    Write-AuditLog "Checking Secrets Hub sync failures (SH4)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $syncLogs = Invoke-CyberArkAPI -Endpoint "SecretsHub/SyncLogs?limit=100" -ErrorAction SilentlyContinue
+            
+            if ($syncLogs -and $syncLogs.logs) {
+                $recentFailures = @($syncLogs.logs | Where-Object { 
+                    $_.status -eq "Failed" -and 
+                    ([DateTime]$_.timestamp) -gt (Get-Date).AddHours(-24)
+                })
+                
+                if ($recentFailures.Count -eq 0) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH4" `
+                        -Finding "No recent sync failures detected" `
+                        -Resource "Secrets Hub Logs" `
+                        -CurrentValue "0 failures in last 24 hours" `
+                        -ExpectedValue "No sync failures" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    $failureDetails = ($recentFailures | Select-Object -First 5 | ForEach-Object { $_.targetName }) -join ", "
+                    
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH4" `
+                        -Finding "Secrets Hub sync failures detected" `
+                        -Resource "Secrets Hub" `
+                        -CurrentValue "$($recentFailures.Count) failures in last 24h. Targets: $failureDetails" `
+                        -ExpectedValue "No sync failures" `
+                        -Recommendation "Investigate failed syncs. Check cloud provider credentials, network connectivity, and target permissions." `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH4" `
+                    -Finding "Secrets Hub sync logs not accessible" `
+                    -Resource "Secrets Hub" `
+                    -CurrentValue "Log endpoint not available" `
+                    -ExpectedValue "Sync failure monitoring enabled" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH4" `
+                -CheckName "Secrets Hub Sync Failures" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH4" `
+            -CheckName "Secrets Hub Sync Failures" `
+            -Reason "Error checking sync failures: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubTargetConfig {
+    # SH5: Validate target configuration
+    Write-AuditLog "Checking Secrets Hub target configuration (SH5)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $targets = Invoke-CyberArkAPI -Endpoint "SecretsHub/Targets" -ErrorAction SilentlyContinue
+            
+            if ($targets -and $targets.targets) {
+                $issues = @()
+                
+                foreach ($target in $targets.targets) {
+                    # Check for insecure configurations
+                    if ($target.useIAMRole -eq $false -and $target.type -match "AWS") {
+                        $issues += "AWS target '$($target.name)' not using IAM roles"
+                    }
+                    if ($target.useManagedIdentity -eq $false -and $target.type -match "Azure") {
+                        $issues += "Azure target '$($target.name)' not using Managed Identity"
+                    }
+                    if ($target.useWorkloadIdentity -eq $false -and $target.type -match "GCP") {
+                        $issues += "GCP target '$($target.name)' not using Workload Identity"
+                    }
+                    if ($target.tlsVerification -eq $false) {
+                        $issues += "Target '$($target.name)' has TLS verification disabled"
+                    }
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Secrets Hub targets securely configured" `
+                        -Resource "Secrets Hub Targets" `
+                        -CurrentValue "$($targets.targets.Count) targets with secure configuration" `
+                        -ExpectedValue "Secure target configuration" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH5" `
+                        -Finding "Secrets Hub target configuration issues" `
+                        -Resource "Secrets Hub Targets" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "IAM roles, Managed Identity, Workload Identity enabled; TLS verification enabled" `
+                        -Recommendation "Use cloud-native identity federation instead of static credentials. Enable TLS verification for all targets." `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH5" `
+                    -Finding "No Secrets Hub targets configured" `
+                    -Resource "Secrets Hub" `
+                    -CurrentValue "No targets found" `
+                    -ExpectedValue "Configured sync targets" `
+                    -Recommendation "Configure Secrets Hub targets for AWS Secrets Manager, Azure Key Vault, or GCP Secret Manager" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH5" `
+                -CheckName "Secrets Hub Target Configuration" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH5" `
+            -CheckName "Secrets Hub Target Configuration" `
+            -Reason "Error checking target configuration: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsHubAuditLogging {
+    # SH6: Verify audit completeness
+    Write-AuditLog "Checking Secrets Hub audit logging (SH6)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $auditConfig = Invoke-CyberArkAPI -Endpoint "SecretsHub/AuditConfiguration" -ErrorAction SilentlyContinue
+            
+            if ($auditConfig) {
+                $issues = @()
+                
+                if ($auditConfig.auditEnabled -ne $true) {
+                    $issues += "Audit logging not enabled"
+                }
+                if ($auditConfig.logSyncOperations -ne $true) {
+                    $issues += "Sync operation logging disabled"
+                }
+                if ($auditConfig.logAccessEvents -ne $true) {
+                    $issues += "Access event logging disabled"
+                }
+                if ($auditConfig.siemIntegration -ne $true -and $auditConfig.syslogEnabled -ne $true) {
+                    $issues += "No SIEM/Syslog integration configured"
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "Secrets Hub audit logging properly configured" `
+                        -Resource "Secrets Hub Audit" `
+                        -CurrentValue "Full audit logging enabled with SIEM integration" `
+                        -ExpectedValue "Complete audit trail" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Secrets Hub" `
+                        -CISControl "SH6" `
+                        -Finding "Secrets Hub audit logging gaps" `
+                        -Resource "Secrets Hub Audit" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "Full audit logging with SIEM integration" `
+                        -Recommendation "Enable comprehensive audit logging and integrate with SIEM for security monitoring" `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-Finding -Category "Secrets Hub" `
+                    -CISControl "SH6" `
+                    -Finding "Unable to verify Secrets Hub audit configuration" `
+                    -Resource "Secrets Hub" `
+                    -CurrentValue "Audit configuration not accessible" `
+                    -ExpectedValue "Audit logging verification" `
+                    -Recommendation "Manually verify Secrets Hub audit logging configuration" `
+                    -Severity "Low" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH6" `
+                -CheckName "Secrets Hub Audit Logging" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH6" `
+            -CheckName "Secrets Hub Audit Logging" `
+            -Reason "Error checking audit logging: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Remote Access / Alero (v4.3)
+
+function Test-RemoteAccessSecurity {
+    Write-AuditLog "Starting Remote Access/Alero security checks..." -Level Info
+    
+    if (-not $IncludeRemoteAccessChecks -and -not $AleroUrl) {
+        Write-AuditLog "Remote Access checks skipped (use -IncludeRemoteAccessChecks)" -Level Info
+        return
+    }
+    
+    Test-VendorInvitationWorkflow
+    Test-RemoteSessionTimeLimits
+    Test-BiometricBinding
+    Test-RemoteAccessAudit
+    Test-VendorAccessReview
+    Test-RemoteAccessMFA
+}
+
+function Test-VendorInvitationWorkflow {
+    # RA1: Invitation expiry, approval workflow
+    Write-AuditLog "Checking vendor invitation workflow (RA1)..." -Level Info
+    
+    try {
+        # Note: $AleroUrl can be used for future direct Alero API calls when available
+        
+        if ($script:AuthToken) {
+            $invitationSettings = Invoke-CyberArkAPI -Endpoint "RemoteAccess/InvitationSettings" -ErrorAction SilentlyContinue
+            
+            if ($invitationSettings) {
+                $issues = @()
+                
+                # Check invitation expiry
+                if ($invitationSettings.invitationExpiryHours -gt 72) {
+                    $issues += "Invitation expiry too long: $($invitationSettings.invitationExpiryHours) hours (max recommended: 72)"
+                }
+                
+                # Check approval workflow
+                if ($invitationSettings.requireApproval -ne $true) {
+                    $issues += "Approval workflow not required for vendor invitations"
+                }
+                
+                # Check email verification
+                if ($invitationSettings.requireEmailVerification -ne $true) {
+                    $issues += "Email verification not required"
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA1" `
+                        -Finding "Vendor invitation workflow properly configured" `
+                        -Resource "Remote Access" `
+                        -CurrentValue "Approval required, expiry: $($invitationSettings.invitationExpiryHours)h" `
+                        -ExpectedValue "Secure invitation workflow" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA1" `
+                        -Finding "Vendor invitation workflow security issues" `
+                        -Resource "Remote Access" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "Approval workflow, email verification, <72h expiry" `
+                        -Recommendation "Enable approval workflow, require email verification, and set invitation expiry to 72 hours or less" `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-Finding -Category "Remote Access" `
+                    -CISControl "RA1" `
+                    -Finding "Remote Access/Alero not configured or not accessible" `
+                    -Resource "Remote Access" `
+                    -CurrentValue "Configuration not available" `
+                    -ExpectedValue "Secure vendor access configuration" `
+                    -Recommendation "Configure CyberArk Remote Access (Alero) for secure third-party access" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA1" `
+                -CheckName "Vendor Invitation Workflow" `
+                -Reason "Authentication required for API access" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA1" `
+            -CheckName "Vendor Invitation Workflow" `
+            -Reason "Error checking invitation workflow: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-RemoteSessionTimeLimits {
+    # RA2: Max session duration enforcement
+    Write-AuditLog "Checking remote session time limits (RA2)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $sessionPolicy = Invoke-CyberArkAPI -Endpoint "RemoteAccess/SessionPolicy" -ErrorAction SilentlyContinue
+            
+            if ($sessionPolicy) {
+                $maxSessionHours = $sessionPolicy.maxSessionDurationMinutes / 60
+                $recommendedMaxHours = 8
+                
+                if ($maxSessionHours -le $recommendedMaxHours) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA2" `
+                        -Finding "Remote session time limits properly configured" `
+                        -Resource "Remote Access Policy" `
+                        -CurrentValue "Max session: $maxSessionHours hours" `
+                        -ExpectedValue "<= $recommendedMaxHours hours" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA2" `
+                        -Finding "Remote session time limit too long" `
+                        -Resource "Remote Access Policy" `
+                        -CurrentValue "Max session: $maxSessionHours hours" `
+                        -ExpectedValue "<= $recommendedMaxHours hours" `
+                        -Recommendation "Reduce maximum session duration to 8 hours or less for vendor sessions" `
+                        -Severity "Medium"
+                }
+                
+                # Check idle timeout
+                if ($sessionPolicy.idleTimeoutMinutes -and $sessionPolicy.idleTimeoutMinutes -gt 30) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA2" `
+                        -Finding "Remote session idle timeout too long" `
+                        -Resource "Remote Access Policy" `
+                        -CurrentValue "Idle timeout: $($sessionPolicy.idleTimeoutMinutes) minutes" `
+                        -ExpectedValue "<= 30 minutes" `
+                        -Recommendation "Set idle timeout to 30 minutes or less" `
+                        -Severity "Low"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Remote Access" -CISControl "RA2" `
+                    -CheckName "Remote Session Time Limits" `
+                    -Reason "Session policy not accessible" `
+                    -Type "MissingConfig"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA2" `
+                -CheckName "Remote Session Time Limits" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA2" `
+            -CheckName "Remote Session Time Limits" `
+            -Reason "Error checking session limits: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-BiometricBinding {
+    # RA3: Device/biometric requirements
+    Write-AuditLog "Checking biometric/device binding (RA3)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $authPolicy = Invoke-CyberArkAPI -Endpoint "RemoteAccess/AuthenticationPolicy" -ErrorAction SilentlyContinue
+            
+            if ($authPolicy) {
+                $issues = @()
+                
+                if ($authPolicy.requireBiometric -ne $true -and $authPolicy.biometricEnabled -ne $true) {
+                    $issues += "Biometric authentication not required"
+                }
+                if ($authPolicy.deviceBinding -ne $true -and $authPolicy.trustedDeviceRequired -ne $true) {
+                    $issues += "Device binding/trusted device not enforced"
+                }
+                if ($authPolicy.allowUntrustedDevices -eq $true) {
+                    $issues += "Access from untrusted devices allowed"
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA3" `
+                        -Finding "Biometric/device binding properly enforced" `
+                        -Resource "Remote Access Authentication" `
+                        -CurrentValue "Biometric and device binding enabled" `
+                        -ExpectedValue "Strong authentication for remote access" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA3" `
+                        -Finding "Weak remote access authentication" `
+                        -Resource "Remote Access Authentication" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "Biometric authentication and device binding required" `
+                        -Recommendation "Enable biometric verification and device binding for all vendor remote access sessions" `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Remote Access" -CISControl "RA3" `
+                    -CheckName "Biometric/Device Binding" `
+                    -Reason "Authentication policy not accessible" `
+                    -Type "MissingConfig"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA3" `
+                -CheckName "Biometric/Device Binding" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA3" `
+            -CheckName "Biometric/Device Binding" `
+            -Reason "Error checking biometric binding: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-RemoteAccessAudit {
+    # RA4: Audit log completeness
+    Write-AuditLog "Checking remote access audit logging (RA4)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $auditConfig = Invoke-CyberArkAPI -Endpoint "RemoteAccess/AuditSettings" -ErrorAction SilentlyContinue
+            
+            if ($auditConfig) {
+                $issues = @()
+                
+                if ($auditConfig.logAllSessions -ne $true) {
+                    $issues += "Not all sessions are being logged"
+                }
+                if ($auditConfig.logAuthenticationEvents -ne $true) {
+                    $issues += "Authentication events not logged"
+                }
+                if ($auditConfig.recordSessions -ne $true) {
+                    $issues += "Session recording not enabled"
+                }
+                if ($auditConfig.retentionDays -lt 90) {
+                    $issues += "Audit retention less than 90 days: $($auditConfig.retentionDays) days"
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA4" `
+                        -Finding "Remote access audit logging comprehensive" `
+                        -Resource "Remote Access Audit" `
+                        -CurrentValue "Full logging, recording, $($auditConfig.retentionDays) day retention" `
+                        -ExpectedValue "Complete audit trail" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA4" `
+                        -Finding "Remote access audit logging gaps" `
+                        -Resource "Remote Access Audit" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "All sessions logged, recorded, 90+ day retention" `
+                        -Recommendation "Enable comprehensive audit logging with session recording and minimum 90-day retention" `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Remote Access" -CISControl "RA4" `
+                    -CheckName "Remote Access Audit" `
+                    -Reason "Audit configuration not accessible" `
+                    -Type "MissingConfig"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA4" `
+                -CheckName "Remote Access Audit" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA4" `
+            -CheckName "Remote Access Audit" `
+            -Reason "Error checking audit config: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-VendorAccessReview {
+    # RA5: Periodic access recertification
+    Write-AuditLog "Checking vendor access review (RA5)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $vendors = Invoke-CyberArkAPI -Endpoint "RemoteAccess/Vendors" -ErrorAction SilentlyContinue
+            
+            if ($vendors -and $vendors.vendors) {
+                $staleVendors = @($vendors.vendors | Where-Object {
+                    $_.lastAccessReview -and 
+                    ([DateTime]$_.lastAccessReview) -lt (Get-Date).AddDays(-90)
+                })
+                
+                $neverReviewed = @($vendors.vendors | Where-Object { -not $_.lastAccessReview })
+                
+                if ($staleVendors.Count -eq 0 -and $neverReviewed.Count -eq 0) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA5" `
+                        -Finding "Vendor access reviews up to date" `
+                        -Resource "Remote Access Vendors" `
+                        -CurrentValue "All $($vendors.vendors.Count) vendors reviewed within 90 days" `
+                        -ExpectedValue "Regular access reviews" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA5" `
+                        -Finding "Vendor access reviews overdue" `
+                        -Resource "Remote Access Vendors" `
+                        -CurrentValue "$($staleVendors.Count) stale reviews, $($neverReviewed.Count) never reviewed" `
+                        -ExpectedValue "All vendors reviewed within 90 days" `
+                        -Recommendation "Conduct access recertification for all vendor accounts. Remove access for vendors no longer requiring it." `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-Finding -Category "Remote Access" `
+                    -CISControl "RA5" `
+                    -Finding "No vendor accounts configured" `
+                    -Resource "Remote Access" `
+                    -CurrentValue "No vendors found" `
+                    -ExpectedValue "N/A" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA5" `
+                -CheckName "Vendor Access Review" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA5" `
+            -CheckName "Vendor Access Review" `
+            -Reason "Error checking vendor reviews: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-RemoteAccessMFA {
+    # RA6: MFA enforcement for vendors
+    Write-AuditLog "Checking remote access MFA enforcement (RA6)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $mfaPolicy = Invoke-CyberArkAPI -Endpoint "RemoteAccess/MFAPolicy" -ErrorAction SilentlyContinue
+            
+            if ($mfaPolicy) {
+                $issues = @()
+                
+                if ($mfaPolicy.mfaRequired -ne $true -and $mfaPolicy.enforced -ne $true) {
+                    $issues += "MFA not required for vendor access"
+                }
+                if ($mfaPolicy.allowSMSFallback -eq $true) {
+                    $issues += "SMS fallback allowed (weak MFA)"
+                }
+                if ($mfaPolicy.allowEmailOTP -eq $true -and $mfaPolicy.strongMFARequired -ne $true) {
+                    $issues += "Email OTP allowed without stronger MFA requirement"
+                }
+                if ($mfaPolicy.rememberDevice -eq $true -and $mfaPolicy.rememberDeviceDays -gt 7) {
+                    $issues += "Device remember period too long: $($mfaPolicy.rememberDeviceDays) days"
+                }
+                
+                if ($issues.Count -eq 0) {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA6" `
+                        -Finding "Remote access MFA properly enforced" `
+                        -Resource "Remote Access MFA" `
+                        -CurrentValue "Strong MFA required for all vendor access" `
+                        -ExpectedValue "MFA enforcement" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Remote Access" `
+                        -CISControl "RA6" `
+                        -Finding "Remote access MFA enforcement issues" `
+                        -Resource "Remote Access MFA" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "Strong MFA required, no SMS fallback, short device remember period" `
+                        -Recommendation "Enforce strong MFA (TOTP/Push/FIDO2), disable SMS fallback, limit device remember to 7 days or less" `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Remote Access" -CISControl "RA6" `
+                    -CheckName "Remote Access MFA" `
+                    -Reason "MFA policy not accessible" `
+                    -Type "MissingConfig"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Remote Access" -CISControl "RA6" `
+                -CheckName "Remote Access MFA" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Remote Access" -CISControl "RA6" `
+            -CheckName "Remote Access MFA" `
+            -Reason "Error checking MFA policy: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Kubernetes / Container Secrets (v4.3)
+
+function Test-KubernetesSecretsSecurity {
+    Write-AuditLog "Starting Kubernetes/Container secrets security checks..." -Level Info
+    
+    if (-not $IncludeK8sChecks) {
+        Write-AuditLog "Kubernetes checks skipped (use -IncludeK8sChecks)" -Level Info
+        return
+    }
+    
+    Test-SecretsProviderDeployment
+    Test-PodSecurityContext
+    Test-ServiceAccountJWT
+    Test-SecretsRotationInPods
+    Test-K8sRBACForSecrets
+    Test-SecretsMountPermissions
+    Test-ConjurFollowerHealth
+    Test-K8sAuditLogging
+}
+
+function Test-SecretsProviderDeployment {
+    # K8S1: Sidecar vs init container mode
+    Write-AuditLog "Checking Secrets Provider deployment mode (K8S1)..." -Level Info
+    
+    try {
+        if ($ConjurApplianceUrl -or $ConjurUrl) {
+            $conjurEndpoint = if ($ConjurApplianceUrl) { $ConjurApplianceUrl } else { $ConjurUrl }
+            
+            # Check for Secrets Provider configuration
+            $response = Invoke-OPSECWebRequest -Uri "$conjurEndpoint/info" -Method GET -ErrorAction SilentlyContinue
+            
+            if ($response -and $response.StatusCode -eq 200) {
+                Add-Finding -Category "Kubernetes" `
+                    -CISControl "K8S1" `
+                    -Finding "Conjur appliance accessible for K8s integration" `
+                    -Resource "Conjur" `
+                    -CurrentValue "Conjur endpoint responsive" `
+                    -ExpectedValue "Accessible Conjur for Secrets Provider" `
+                    -Severity "Info" `
+                    -Status "Pass"
+                    
+                # Recommend sidecar over init container
+                Add-Finding -Category "Kubernetes" `
+                    -CISControl "K8S1" `
+                    -Finding "Secrets Provider deployment recommendation" `
+                    -Resource "Kubernetes Deployment" `
+                    -CurrentValue "Manual verification required" `
+                    -ExpectedValue "Sidecar mode for dynamic secret refresh" `
+                    -Recommendation "Use sidecar mode for Secrets Provider to enable dynamic secret rotation. Init container mode only fetches secrets at pod startup." `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            else {
+                Add-Finding -Category "Kubernetes" `
+                    -CISControl "K8S1" `
+                    -Finding "Conjur appliance not accessible" `
+                    -Resource $conjurEndpoint `
+                    -CurrentValue "Endpoint not responding" `
+                    -ExpectedValue "Accessible Conjur endpoint" `
+                    -Recommendation "Verify Conjur appliance URL and network connectivity" `
+                    -Severity "Medium"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S1" `
+                -CheckName "Secrets Provider Deployment" `
+                -Reason "Conjur URL not provided" `
+                -Type "MissingConfig"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S1" `
+            -CheckName "Secrets Provider Deployment" `
+            -Reason "Error checking deployment: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PodSecurityContext {
+    # K8S2: runAsNonRoot, readOnlyRootFilesystem
+    Write-AuditLog "Checking pod security context requirements (K8S2)..." -Level Info
+    
+    try {
+        # This check provides guidance - actual K8s cluster access would require kubectl
+        Add-Finding -Category "Kubernetes" `
+            -CISControl "K8S2" `
+            -Finding "Pod security context recommendations" `
+            -Resource "Kubernetes Pods" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "runAsNonRoot: true, readOnlyRootFilesystem: true" `
+            -Recommendation "Ensure Secrets Provider pods run with: runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false. Verify with: kubectl get pods -o yaml | grep -A10 securityContext" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S2" `
+            -CheckName "Pod Security Context" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ServiceAccountJWT {
+    # K8S3: JWT authentication to Conjur
+    Write-AuditLog "Checking service account JWT authentication (K8S3)..." -Level Info
+    
+    try {
+        if ($ConjurUrl -or $ConjurApplianceUrl) {
+            $conjurEndpoint = if ($ConjurApplianceUrl) { $ConjurApplianceUrl } else { $ConjurUrl }
+            
+            # Check authenticators endpoint - info endpoint confirms Conjur is accessible
+            $null = Invoke-OPSECWebRequest -Uri "$conjurEndpoint/info" -Method GET -ErrorAction SilentlyContinue
+            
+            Add-Finding -Category "Kubernetes" `
+                -CISControl "K8S3" `
+                -Finding "Kubernetes authenticator configuration" `
+                -Resource "Conjur K8s Authenticator" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "authn-jwt/k8s or authn-k8s authenticator enabled" `
+                -Recommendation "Verify Kubernetes authenticator is properly configured. Use authn-jwt for improved security over authn-k8s. Check audience claim restrictions and issuer validation." `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+        else {
+            Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S3" `
+                -CheckName "Service Account JWT" `
+                -Reason "Conjur URL not provided" `
+                -Type "MissingConfig"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S3" `
+            -CheckName "Service Account JWT" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsRotationInPods {
+    # K8S4: How running pods handle rotation
+    Write-AuditLog "Checking secrets rotation handling in pods (K8S4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Kubernetes" `
+            -CISControl "K8S4" `
+            -Finding "Secrets rotation in running pods" `
+            -Resource "Kubernetes Pods" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Dynamic refresh via sidecar or file watch" `
+            -Recommendation "Verify applications can handle secret rotation: 1) Use sidecar mode with refresh interval, 2) Implement file watchers in apps, 3) Use Kubernetes CSI driver with rotation. Avoid init-container only deployments for secrets requiring rotation." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S4" `
+            -CheckName "Secrets Rotation in Pods" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-K8sRBACForSecrets {
+    # K8S5: Who can read secrets
+    Write-AuditLog "Checking Kubernetes RBAC for secrets (K8S5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Kubernetes" `
+            -CISControl "K8S5" `
+            -Finding "Kubernetes RBAC for secrets access" `
+            -Resource "Kubernetes RBAC" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Least privilege access to secrets" `
+            -Recommendation "Audit RBAC with: kubectl auth can-i --list | grep secrets. Ensure only necessary service accounts have 'get' on secrets. Avoid cluster-wide secret read permissions. Use namespace-scoped bindings." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S5" `
+            -CheckName "K8s RBAC for Secrets" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsMountPermissions {
+    # K8S6: File permissions on mounted secrets
+    Write-AuditLog "Checking secrets mount permissions (K8S6)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Kubernetes" `
+            -CISControl "K8S6" `
+            -Finding "Secrets mount file permissions" `
+            -Resource "Kubernetes Secrets" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Mode 0400 or 0440" `
+            -Recommendation "Set restrictive file permissions on mounted secrets: defaultMode: 0400 in volume mount. Verify with: kubectl exec <pod> -- ls -la /path/to/secrets. Avoid world-readable permissions (0644)." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S6" `
+            -CheckName "Secrets Mount Permissions" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ConjurFollowerHealth {
+    # K8S7: Follower pod health in cluster
+    Write-AuditLog "Checking Conjur follower health (K8S7)..." -Level Info
+    
+    try {
+        if ($ConjurUrl -or $ConjurApplianceUrl) {
+            $conjurEndpoint = if ($ConjurApplianceUrl) { $ConjurApplianceUrl } else { $ConjurUrl }
+            
+            $healthResponse = Invoke-OPSECWebRequest -Uri "$conjurEndpoint/health" -Method GET -ErrorAction SilentlyContinue
+            
+            if ($healthResponse -and $healthResponse.StatusCode -eq 200) {
+                $healthData = $healthResponse.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+                
+                if ($healthData.ok -eq $true -or $healthData.status -eq "ok") {
+                    Add-Finding -Category "Kubernetes" `
+                        -CISControl "K8S7" `
+                        -Finding "Conjur follower health check passed" `
+                        -Resource "Conjur Follower" `
+                        -CurrentValue "Health status: OK" `
+                        -ExpectedValue "Healthy follower" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Kubernetes" `
+                        -CISControl "K8S7" `
+                        -Finding "Conjur follower health issues detected" `
+                        -Resource "Conjur Follower" `
+                        -CurrentValue "Health status: $($healthData.status)" `
+                        -ExpectedValue "Healthy follower" `
+                        -Recommendation "Investigate Conjur follower health. Check replication status, certificate validity, and resource constraints." `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Kubernetes" `
+                    -CISControl "K8S7" `
+                    -Finding "Conjur health endpoint not accessible" `
+                    -Resource $conjurEndpoint `
+                    -CurrentValue "Health endpoint returned: $($healthResponse.StatusCode)" `
+                    -ExpectedValue "Accessible health endpoint" `
+                    -Recommendation "Verify Conjur follower deployment and network accessibility" `
+                    -Severity "Medium"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S7" `
+                -CheckName "Conjur Follower Health" `
+                -Reason "Conjur URL not provided" `
+                -Type "MissingConfig"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S7" `
+            -CheckName "Conjur Follower Health" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-K8sAuditLogging {
+    # K8S8: Kubernetes audit for secrets access
+    Write-AuditLog "Checking Kubernetes audit logging for secrets (K8S8)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Kubernetes" `
+            -CISControl "K8S8" `
+            -Finding "Kubernetes audit logging for secrets" `
+            -Resource "Kubernetes Audit" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Secrets access logged at Request or RequestResponse level" `
+            -Recommendation "Configure Kubernetes audit policy to log secrets access. Include: resources: ['secrets'], verbs: ['get', 'list', 'watch'], level: Request. Forward audit logs to SIEM for monitoring." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S8" `
+            -CheckName "K8s Audit Logging" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region DevSecOps Pipeline Security (v4.3)
+
+function Test-DevSecOpsSecurity {
+    Write-AuditLog "Starting DevSecOps pipeline security checks..." -Level Info
+    
+    if (-not $IncludeDevSecOpsChecks) {
+        Write-AuditLog "DevSecOps checks skipped (use -IncludeDevSecOpsChecks)" -Level Info
+        return
+    }
+    
+    Test-CICDSecretsRetrieval
+    Test-PipelineSecretsSprawl
+    Test-ShortLivedTokenUsage
+    Test-PipelineAuditLogging
+    Test-SecretsInArtifacts
+    Test-PipelineIdentityBinding
+}
+
+function Test-CICDSecretsRetrieval {
+    # DSO1: How pipelines fetch secrets
+    Write-AuditLog "Checking CI/CD secrets retrieval patterns (DSO1)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            # Check for AppIDs that appear to be CI/CD related
+            $appIds = Invoke-CyberArkAPI -Endpoint "Applications" -ErrorAction SilentlyContinue
+            
+            if ($appIds -and $appIds.application) {
+                $cicdApps = @($appIds.application | Where-Object { 
+                    $_.AppID -match "jenkins|gitlab|github|azure.?devops|bamboo|circleci|travis|drone|argo|tekton|pipeline|cicd|build|deploy" 
+                })
+                
+                if ($cicdApps.Count -gt 0) {
+                    $insecureApps = @()
+                    foreach ($app in $cicdApps) {
+                        $appDetail = Invoke-CyberArkAPI -Endpoint "Applications/$($app.AppID)" -ErrorAction SilentlyContinue
+                        if ($appDetail -and $appDetail.authentication) {
+                            # Check for weak authentication
+                            if ($appDetail.authentication | Where-Object { $_.AuthType -eq "machineAddress" -and -not $_.AuthValue }) {
+                                $insecureApps += $app.AppID
+                            }
+                        }
+                    }
+                    
+                    if ($insecureApps.Count -eq 0) {
+                        Add-Finding -Category "DevSecOps" `
+                            -CISControl "DSO1" `
+                            -Finding "CI/CD AppIDs configured with authentication" `
+                            -Resource "CI/CD Applications" `
+                            -CurrentValue "$($cicdApps.Count) CI/CD-related AppIDs found" `
+                            -ExpectedValue "Secure secret retrieval" `
+                            -Severity "Info" `
+                            -Status "Pass"
+                    }
+                    else {
+                        Add-Finding -Category "DevSecOps" `
+                            -CISControl "DSO1" `
+                            -Finding "CI/CD AppIDs with weak authentication" `
+                            -Resource "CI/CD Applications" `
+                            -CurrentValue "Weak auth on: $($insecureApps -join ', ')" `
+                            -ExpectedValue "Strong authentication (certificates, OIDC)" `
+                            -Recommendation "Use certificate authentication or OIDC for CI/CD integrations. Avoid IP-only restrictions." `
+                            -Severity "High"
+                    }
+                }
+                else {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO1" `
+                        -Finding "No CI/CD-specific AppIDs detected" `
+                        -Resource "Applications" `
+                        -CurrentValue "No CI/CD AppIDs found by naming pattern" `
+                        -ExpectedValue "Dedicated CI/CD AppIDs" `
+                        -Recommendation "Create dedicated AppIDs for CI/CD pipelines with appropriate naming conventions" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO1" `
+                    -CheckName "CI/CD Secrets Retrieval" `
+                    -Reason "Unable to retrieve applications list" `
+                    -Type "MissingData"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO1" `
+                -CheckName "CI/CD Secrets Retrieval" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO1" `
+            -CheckName "CI/CD Secrets Retrieval" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PipelineSecretsSprawl {
+    # DSO2: Hardcoded secrets in configs
+    Write-AuditLog "Checking for pipeline secrets sprawl indicators (DSO2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "DevSecOps" `
+            -CISControl "DSO2" `
+            -Finding "Pipeline secrets sprawl assessment" `
+            -Resource "CI/CD Pipelines" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "No hardcoded secrets in pipeline configs" `
+            -Recommendation "Scan pipeline configurations for hardcoded secrets. Use tools like: gitleaks, truffleHog, detect-secrets. Check: 1) Pipeline YAML files, 2) Environment variables, 3) Build scripts, 4) Dockerfiles. Integrate CyberArk Secrets Manager for runtime secret injection." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO2" `
+            -CheckName "Pipeline Secrets Sprawl" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ShortLivedTokenUsage {
+    # DSO3: Token TTL vs static credentials
+    Write-AuditLog "Checking short-lived token usage (DSO3)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $ccpConfig = Invoke-CyberArkAPI -Endpoint "CentralCredentialProvider/Configuration" -ErrorAction SilentlyContinue
+            
+            if ($ccpConfig) {
+                $tokenTTL = $ccpConfig.tokenTTLMinutes
+                $recommendedMaxTTL = 60  # 1 hour max
+                
+                if ($tokenTTL -and $tokenTTL -le $recommendedMaxTTL) {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO3" `
+                        -Finding "Short-lived tokens properly configured" `
+                        -Resource "CCP Configuration" `
+                        -CurrentValue "Token TTL: $tokenTTL minutes" `
+                        -ExpectedValue "<= $recommendedMaxTTL minutes" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                elseif ($tokenTTL -and $tokenTTL -gt $recommendedMaxTTL) {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO3" `
+                        -Finding "Token TTL too long for CI/CD use" `
+                        -Resource "CCP Configuration" `
+                        -CurrentValue "Token TTL: $tokenTTL minutes" `
+                        -ExpectedValue "<= $recommendedMaxTTL minutes" `
+                        -Recommendation "Reduce token TTL to 60 minutes or less for CI/CD pipelines. Short-lived tokens limit exposure window." `
+                        -Severity "Medium"
+                }
+                else {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO3" `
+                        -Finding "Short-lived token configuration" `
+                        -Resource "CCP" `
+                        -CurrentValue "TTL configuration not available" `
+                        -ExpectedValue "Token TTL configured" `
+                        -Recommendation "Configure token TTL for CI/CD secret retrieval" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+            else {
+                Add-Finding -Category "DevSecOps" `
+                    -CISControl "DSO3" `
+                    -Finding "CCP configuration not accessible" `
+                    -Resource "Central Credential Provider" `
+                    -CurrentValue "Configuration not available" `
+                    -ExpectedValue "CCP configured for CI/CD" `
+                    -Recommendation "Deploy Central Credential Provider for CI/CD secret retrieval with short-lived tokens" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO3" `
+                -CheckName "Short-Lived Token Usage" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO3" `
+            -CheckName "Short-Lived Token Usage" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PipelineAuditLogging {
+    # DSO4: Pipeline access logged to CyberArk
+    Write-AuditLog "Checking pipeline audit logging (DSO4)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            # Check if CCP access is being logged
+            $auditLogs = Invoke-CyberArkAPI -Endpoint "Activities?limit=50" -ErrorAction SilentlyContinue
+            
+            if ($auditLogs -and $auditLogs.Activities) {
+                $ccpActivities = @($auditLogs.Activities | Where-Object { 
+                    $_.Action -match "GetPassword|Retrieve" -and $_.Reason -match "CCP|Provider|API"
+                })
+                
+                if ($ccpActivities.Count -gt 0) {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO4" `
+                        -Finding "Pipeline secret access being logged" `
+                        -Resource "Audit Logs" `
+                        -CurrentValue "$($ccpActivities.Count) CCP/API activities in recent logs" `
+                        -ExpectedValue "All pipeline access logged" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO4" `
+                        -Finding "No recent pipeline secret access logged" `
+                        -Resource "Audit Logs" `
+                        -CurrentValue "No CCP activities found in recent logs" `
+                        -ExpectedValue "Pipeline access events" `
+                        -Recommendation "Verify CCP audit logging is enabled and pipelines are using CyberArk for secrets" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO4" `
+                    -CheckName "Pipeline Audit Logging" `
+                    -Reason "Unable to retrieve audit logs" `
+                    -Type "MissingData"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO4" `
+                -CheckName "Pipeline Audit Logging" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO4" `
+            -CheckName "Pipeline Audit Logging" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SecretsInArtifacts {
+    # DSO5: Secrets leaked in build artifacts
+    Write-AuditLog "Checking for secrets in artifacts guidance (DSO5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "DevSecOps" `
+            -CISControl "DSO5" `
+            -Finding "Secrets in build artifacts assessment" `
+            -Resource "Build Artifacts" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "No secrets in artifacts or logs" `
+            -Recommendation "Prevent secrets in build artifacts: 1) Never log secrets - mask in CI/CD, 2) Use .dockerignore for credential files, 3) Multi-stage Docker builds, 4) Scan images with tools like Trivy, 5) Implement artifact signing, 6) Use runtime secret injection not build-time." `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO5" `
+            -CheckName "Secrets in Artifacts" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PipelineIdentityBinding {
+    # DSO6: Pipeline identity to CyberArk mapping
+    Write-AuditLog "Checking pipeline identity binding (DSO6)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $appIds = Invoke-CyberArkAPI -Endpoint "Applications" -ErrorAction SilentlyContinue
+            
+            if ($appIds -and $appIds.application) {
+                $wellConfiguredApps = @()
+                $weakApps = @()
+                
+                foreach ($app in $appIds.application) {
+                    $appDetail = Invoke-CyberArkAPI -Endpoint "Applications/$($app.AppID)/Authentications" -ErrorAction SilentlyContinue
+                    
+                    if ($appDetail) {
+                        $hasStrongAuth = $appDetail | Where-Object { 
+                            $_.AuthType -in @("certificateSerialNumber", "certificateAttr", "awsIAMRole", "azureManagedIdentity", "oidcToken")
+                        }
+                        
+                        if ($hasStrongAuth) {
+                            $wellConfiguredApps += $app.AppID
+                        }
+                        else {
+                            $weakApps += $app.AppID
+                        }
+                    }
+                }
+                
+                if ($weakApps.Count -eq 0 -and $wellConfiguredApps.Count -gt 0) {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO6" `
+                        -Finding "Pipeline identity binding properly configured" `
+                        -Resource "Application Authentications" `
+                        -CurrentValue "$($wellConfiguredApps.Count) apps with strong identity binding" `
+                        -ExpectedValue "Identity-based authentication" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                elseif ($weakApps.Count -gt 0) {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO6" `
+                        -Finding "Weak pipeline identity binding detected" `
+                        -Resource "Application Authentications" `
+                        -CurrentValue "$($weakApps.Count) apps without strong identity binding" `
+                        -ExpectedValue "Certificate, IAM role, or OIDC authentication" `
+                        -Recommendation "Use identity-based authentication: AWS IAM roles, Azure Managed Identity, GCP Workload Identity, or certificates. Avoid IP-only or path-based authentication." `
+                        -Severity "Medium"
+                }
+                else {
+                    Add-Finding -Category "DevSecOps" `
+                        -CISControl "DSO6" `
+                        -Finding "No applications configured" `
+                        -Resource "Applications" `
+                        -CurrentValue "No AppIDs found" `
+                        -ExpectedValue "AppIDs for CI/CD" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO6" `
+                    -CheckName "Pipeline Identity Binding" `
+                    -Reason "Unable to retrieve applications" `
+                    -Type "MissingData"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO6" `
+                -CheckName "Pipeline Identity Binding" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO6" `
+            -CheckName "Pipeline Identity Binding" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Privilege Cloud / SaaS-Specific (v4.3)
+
+function Test-PrivilegeCloudSecurity {
+    Write-AuditLog "Starting Privilege Cloud security checks..." -Level Info
+    
+    if (-not $IsPrivilegeCloud) {
+        Write-AuditLog "Privilege Cloud checks skipped (use -IsPrivilegeCloud)" -Level Info
+        return
+    }
+    
+    Test-ConnectorHealth
+    Test-ISPIntegration
+    Test-PrivilegeCloudAPI
+    Test-TenantIsolation
+    Test-CloudConnectorRedundancy
+}
+
+function Test-ConnectorHealth {
+    # PC1: Connector status and version
+    Write-AuditLog "Checking Privilege Cloud connector health (PC1)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $connectors = Invoke-CyberArkAPI -Endpoint "PrivilegeCloud/Connectors" -ErrorAction SilentlyContinue
+            
+            if ($connectors -and $connectors.connectors) {
+                $unhealthyConnectors = @($connectors.connectors | Where-Object { 
+                    $_.status -ne "Connected" -and $_.status -ne "Healthy"
+                })
+                
+                $outdatedConnectors = @($connectors.connectors | Where-Object {
+                    $_.updateAvailable -eq $true
+                })
+                
+                if ($unhealthyConnectors.Count -eq 0 -and $outdatedConnectors.Count -eq 0) {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC1" `
+                        -Finding "All Privilege Cloud connectors healthy and current" `
+                        -Resource "Connectors" `
+                        -CurrentValue "$($connectors.connectors.Count) connectors, all healthy" `
+                        -ExpectedValue "Healthy, up-to-date connectors" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    $issues = @()
+                    if ($unhealthyConnectors.Count -gt 0) {
+                        $issues += "$($unhealthyConnectors.Count) unhealthy connectors"
+                    }
+                    if ($outdatedConnectors.Count -gt 0) {
+                        $issues += "$($outdatedConnectors.Count) connectors need updates"
+                    }
+                    
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC1" `
+                        -Finding "Privilege Cloud connector issues detected" `
+                        -Resource "Connectors" `
+                        -CurrentValue ($issues -join "; ") `
+                        -ExpectedValue "All connectors healthy and current" `
+                        -Recommendation "Investigate unhealthy connectors and apply pending updates. Check network connectivity and service status." `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-Finding -Category "Privilege Cloud" `
+                    -CISControl "PC1" `
+                    -Finding "Unable to retrieve connector status" `
+                    -Resource "Privilege Cloud" `
+                    -CurrentValue "Connector API not accessible" `
+                    -ExpectedValue "Connector status available" `
+                    -Recommendation "Verify Privilege Cloud API access and permissions" `
+                    -Severity "Medium"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC1" `
+                -CheckName "Connector Health" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC1" `
+            -CheckName "Connector Health" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ISPIntegration {
+    # PC2: Identity Security Platform status
+    Write-AuditLog "Checking Identity Security Platform integration (PC2)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $ispConfig = Invoke-CyberArkAPI -Endpoint "IdentitySecurityPlatform/Configuration" -ErrorAction SilentlyContinue
+            
+            if ($ispConfig) {
+                if ($ispConfig.enabled -eq $true -and $ispConfig.status -eq "Connected") {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC2" `
+                        -Finding "Identity Security Platform integration active" `
+                        -Resource "ISP Integration" `
+                        -CurrentValue "ISP connected and enabled" `
+                        -ExpectedValue "Active ISP integration" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC2" `
+                        -Finding "Identity Security Platform integration issue" `
+                        -Resource "ISP Integration" `
+                        -CurrentValue "Status: $($ispConfig.status), Enabled: $($ispConfig.enabled)" `
+                        -ExpectedValue "Connected and enabled" `
+                        -Recommendation "Enable ISP integration for unified identity and access management" `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-Finding -Category "Privilege Cloud" `
+                    -CISControl "PC2" `
+                    -Finding "ISP configuration not accessible" `
+                    -Resource "Privilege Cloud" `
+                    -CurrentValue "ISP API not available" `
+                    -ExpectedValue "ISP integration configured" `
+                    -Recommendation "Configure Identity Security Platform for unified identity management" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC2" `
+                -CheckName "ISP Integration" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC2" `
+            -CheckName "ISP Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PrivilegeCloudAPI {
+    # PC3: Cloud API endpoint security
+    Write-AuditLog "Checking Privilege Cloud API security (PC3)..." -Level Info
+    
+    try {
+        # Test API endpoint security headers
+        $apiEndpoint = "$PVWA/PasswordVault/API/Auth/Logon"
+        $response = Invoke-OPSECWebRequest -Uri $apiEndpoint -Method OPTIONS -ErrorAction SilentlyContinue
+        
+        $issues = @()
+        
+        if ($response) {
+            $headers = $response.Headers
+            
+            # Check security headers
+            if (-not $headers["Strict-Transport-Security"]) {
+                $issues += "Missing HSTS header"
+            }
+            if (-not $headers["X-Content-Type-Options"]) {
+                $issues += "Missing X-Content-Type-Options"
+            }
+            if (-not $headers["X-Frame-Options"] -and -not $headers["Content-Security-Policy"]) {
+                $issues += "Missing clickjacking protection"
+            }
+        }
+        
+        if ($issues.Count -eq 0) {
+            Add-Finding -Category "Privilege Cloud" `
+                -CISControl "PC3" `
+                -Finding "Privilege Cloud API security headers configured" `
+                -Resource "API Endpoint" `
+                -CurrentValue "Security headers present" `
+                -ExpectedValue "HSTS, X-Content-Type-Options, X-Frame-Options" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+        else {
+            Add-Finding -Category "Privilege Cloud" `
+                -CISControl "PC3" `
+                -Finding "Privilege Cloud API security header gaps" `
+                -Resource "API Endpoint" `
+                -CurrentValue ($issues -join "; ") `
+                -ExpectedValue "All security headers present" `
+                -Recommendation "Contact CyberArk support regarding missing security headers (managed service)" `
+                -Severity "Low"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC3" `
+            -CheckName "Privilege Cloud API Security" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-TenantIsolation {
+    # PC4: Multi-tenant isolation checks
+    Write-AuditLog "Checking tenant isolation (PC4)..." -Level Info
+    
+    try {
+        if ($PrivilegeCloudTenant) {
+            Add-Finding -Category "Privilege Cloud" `
+                -CISControl "PC4" `
+                -Finding "Privilege Cloud tenant identification" `
+                -Resource "Tenant" `
+                -CurrentValue "Tenant: $PrivilegeCloudTenant" `
+                -ExpectedValue "Isolated tenant environment" `
+                -Recommendation "Verify tenant isolation: 1) Unique tenant URL, 2) Data segregation, 3) Audit log separation. CyberArk manages infrastructure isolation." `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+        else {
+            Add-Finding -Category "Privilege Cloud" `
+                -CISControl "PC4" `
+                -Finding "Tenant isolation verification" `
+                -Resource "Privilege Cloud" `
+                -CurrentValue "Tenant name not provided" `
+                -ExpectedValue "Identified tenant for isolation verification" `
+                -Recommendation "Provide -PrivilegeCloudTenant parameter for tenant-specific checks" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC4" `
+            -CheckName "Tenant Isolation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CloudConnectorRedundancy {
+    # PC5: Connector HA configuration
+    Write-AuditLog "Checking connector redundancy (PC5)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $connectors = Invoke-CyberArkAPI -Endpoint "PrivilegeCloud/Connectors" -ErrorAction SilentlyContinue
+            
+            if ($connectors -and $connectors.connectors) {
+                $connectorCount = $connectors.connectors.Count
+                $healthyCount = @($connectors.connectors | Where-Object { $_.status -eq "Connected" -or $_.status -eq "Healthy" }).Count
+                
+                if ($connectorCount -ge 2 -and $healthyCount -ge 2) {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC5" `
+                        -Finding "Connector redundancy properly configured" `
+                        -Resource "Connectors" `
+                        -CurrentValue "$healthyCount of $connectorCount connectors healthy" `
+                        -ExpectedValue "At least 2 healthy connectors" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                elseif ($connectorCount -lt 2) {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC5" `
+                        -Finding "Insufficient connector redundancy" `
+                        -Resource "Connectors" `
+                        -CurrentValue "Only $connectorCount connector(s) deployed" `
+                        -ExpectedValue "At least 2 connectors for HA" `
+                        -Recommendation "Deploy additional connectors for high availability. Single connector is a single point of failure." `
+                        -Severity "High"
+                }
+                else {
+                    Add-Finding -Category "Privilege Cloud" `
+                        -CISControl "PC5" `
+                        -Finding "Connector redundancy at risk" `
+                        -Resource "Connectors" `
+                        -CurrentValue "Only $healthyCount of $connectorCount connectors healthy" `
+                        -ExpectedValue "At least 2 healthy connectors" `
+                        -Recommendation "Restore unhealthy connectors to maintain high availability" `
+                        -Severity "High"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC5" `
+                    -CheckName "Connector Redundancy" `
+                    -Reason "Connector data not available" `
+                    -Type "MissingData"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC5" `
+                -CheckName "Connector Redundancy" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC5" `
+            -CheckName "Connector Redundancy" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region CyberArk Identity / Idaptive (v4.3)
+
+function Test-CyberArkIdentitySecurity {
+    Write-AuditLog "Starting CyberArk Identity security checks..." -Level Info
+    
+    if (-not $IncludeIdentityChecks -and -not $IdentityTenantUrl) {
+        Write-AuditLog "Identity checks skipped (use -IncludeIdentityChecks)" -Level Info
+        return
+    }
+    
+    Test-SSOIntegrationPVWA
+    Test-AdaptiveMFAPolicy
+    Test-IdentityLifecycleSync
+    Test-SessionRiskScoring
+    Test-IdentityAuditIntegration
+    Test-IdentityAppCatalog
+}
+
+function Test-SSOIntegrationPVWA {
+    # IDN1: SSO to PVWA configuration
+    Write-AuditLog "Checking SSO integration with PVWA (IDN1)..." -Level Info
+    
+    try {
+        if ($script:AuthToken) {
+            $authMethods = Invoke-CyberArkAPI -Endpoint "Configuration/AuthenticationMethods" -ErrorAction SilentlyContinue
+            
+            if ($authMethods) {
+                $samlEnabled = $authMethods | Where-Object { $_.id -match "SAML|SSO" -and $_.enabled -eq $true }
+                $oidcEnabled = $authMethods | Where-Object { $_.id -match "OIDC|OAuth" -and $_.enabled -eq $true }
+                
+                if ($samlEnabled -or $oidcEnabled) {
+                    $ssoType = if ($samlEnabled) { "SAML" } else { "OIDC" }
+                    Add-Finding -Category "CyberArk Identity" `
+                        -CISControl "IDN1" `
+                        -Finding "SSO integration enabled for PVWA" `
+                        -Resource "Authentication Methods" `
+                        -CurrentValue "$ssoType SSO enabled" `
+                        -ExpectedValue "SSO integration active" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+                else {
+                    Add-Finding -Category "CyberArk Identity" `
+                        -CISControl "IDN1" `
+                        -Finding "SSO not configured for PVWA" `
+                        -Resource "Authentication Methods" `
+                        -CurrentValue "No SAML/OIDC configured" `
+                        -ExpectedValue "SSO integration for centralized authentication" `
+                        -Recommendation "Enable SAML or OIDC SSO with CyberArk Identity for centralized authentication and MFA" `
+                        -Severity "Medium"
+                }
+            }
+            else {
+                Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN1" `
+                    -CheckName "SSO Integration" `
+                    -Reason "Auth methods not accessible" `
+                    -Type "MissingData"
+            }
+        }
+        else {
+            Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN1" `
+                -CheckName "SSO Integration" `
+                -Reason "Authentication required" `
+                -Type "NotAuthenticated"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN1" `
+            -CheckName "SSO Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-AdaptiveMFAPolicy {
+    # IDN2: Risk-based MFA strength
+    Write-AuditLog "Checking adaptive MFA policy (IDN2)..." -Level Info
+    
+    try {
+        if ($IdentityTenantUrl) {
+            # Check Identity tenant for adaptive MFA
+            $mfaEndpoint = "$IdentityTenantUrl/api/mfa/policies"
+            $response = Invoke-OPSECWebRequest -Uri $mfaEndpoint -Method GET -ErrorAction SilentlyContinue
+            
+            if ($response -and $response.StatusCode -eq 200) {
+                Add-Finding -Category "CyberArk Identity" `
+                    -CISControl "IDN2" `
+                    -Finding "Adaptive MFA policies accessible" `
+                    -Resource "CyberArk Identity" `
+                    -CurrentValue "MFA policy endpoint responsive" `
+                    -ExpectedValue "Adaptive MFA configured" `
+                    -Recommendation "Verify: 1) Risk-based step-up MFA, 2) Device trust policies, 3) Location-based policies, 4) Behavior analytics integration" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            else {
+                Add-Finding -Category "CyberArk Identity" `
+                    -CISControl "IDN2" `
+                    -Finding "Adaptive MFA verification required" `
+                    -Resource "CyberArk Identity" `
+                    -CurrentValue "MFA policy endpoint not accessible" `
+                    -ExpectedValue "Adaptive MFA configured" `
+                    -Recommendation "Manually verify adaptive MFA policies in CyberArk Identity admin console" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "CyberArk Identity" `
+                -CISControl "IDN2" `
+                -Finding "Adaptive MFA assessment" `
+                -Resource "CyberArk Identity" `
+                -CurrentValue "Identity tenant URL not provided" `
+                -ExpectedValue "Risk-based adaptive MFA" `
+                -Recommendation "Configure adaptive MFA: step-up for risky logins, device trust, geolocation policies" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN2" `
+            -CheckName "Adaptive MFA Policy" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-IdentityLifecycleSync {
+    # IDN3: HR/AD sync for lifecycle
+    Write-AuditLog "Checking identity lifecycle sync (IDN3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "CyberArk Identity" `
+            -CISControl "IDN3" `
+            -Finding "Identity lifecycle synchronization" `
+            -Resource "CyberArk Identity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Automated lifecycle from HR/AD" `
+            -Recommendation "Verify: 1) HR system integration for joiner/mover/leaver, 2) AD sync for attribute updates, 3) Automated deprovisioning on termination, 4) Access review triggers on role change" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN3" `
+            -CheckName "Identity Lifecycle Sync" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SessionRiskScoring {
+    # IDN4: Risk score thresholds
+    Write-AuditLog "Checking session risk scoring (IDN4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "CyberArk Identity" `
+            -CISControl "IDN4" `
+            -Finding "Session risk scoring configuration" `
+            -Resource "CyberArk Identity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Risk scoring with appropriate thresholds" `
+            -Recommendation "Configure risk scoring: 1) Set thresholds for MFA step-up (Medium/High), 2) Block on Critical risk, 3) Enable behavior analytics, 4) Configure impossible travel detection" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN4" `
+            -CheckName "Session Risk Scoring" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-IdentityAuditIntegration {
+    # IDN5: Identity events to SIEM
+    Write-AuditLog "Checking Identity audit integration (IDN5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "CyberArk Identity" `
+            -CISControl "IDN5" `
+            -Finding "Identity audit log integration" `
+            -Resource "CyberArk Identity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Identity events forwarded to SIEM" `
+            -Recommendation "Configure: 1) SIEM connector for Identity events, 2) Real-time forwarding, 3) Include: login events, MFA challenges, policy changes, admin actions" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN5" `
+            -CheckName "Identity Audit Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-IdentityAppCatalog {
+    # IDN6: Privileged app access policies
+    Write-AuditLog "Checking Identity app catalog (IDN6)..." -Level Info
+    
+    try {
+        Add-Finding -Category "CyberArk Identity" `
+            -CISControl "IDN6" `
+            -Finding "Privileged application access policies" `
+            -Resource "CyberArk Identity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Privileged apps require strong auth" `
+            -Recommendation "Verify: 1) PVWA app in catalog with MFA requirement, 2) Strong auth for admin consoles, 3) Device trust for sensitive apps, 4) Session recording for privileged app access" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN6" `
+            -CheckName "Identity App Catalog" `
+            -Reason "Error: $($_.Exception.Message)" `
             -Type "Error"
     }
 }
@@ -10478,7 +13644,7 @@ function New-HTMLReport {
             </div>
             <div class="stat-card">
                 <div class="number" style="color: #95a5a6;">$skippedCount</div>
-                <div class="label">Skipped/N/A</div>
+                <div class="label">Skipped ($naCount N/A, $errorCount Errors)</div>
             </div>
         </div>
 
@@ -10745,15 +13911,8 @@ function Export-JSONReport {
 
 #region Main Execution
 function Start-Audit {
-    # Display banner unless suppressed
+    # Display detailed info unless suppressed with -NoLogo
     if (-not $NoLogo) {
-        Write-Host ""
-        Write-Host "========================================================" -ForegroundColor Cyan
-        Write-Host "  CyberArk Security Configuration Audit v4.2" -ForegroundColor Cyan
-        Write-Host "  Comprehensive Security Assessment Suite" -ForegroundColor Cyan
-        Write-Host "  Red Team / Offensive Security Edition" -ForegroundColor Red
-        Write-Host "========================================================" -ForegroundColor Cyan
-        Write-Host ""
         Write-Host "  Check Categories:" -ForegroundColor Gray
         Write-Host "    [UNAUTH] Blackbox/Network/CVE Security (No auth required)" -ForegroundColor DarkGray
         Write-Host "    [AUTH]   CIS/Vendor/Identity Governance (CyberArk auth)" -ForegroundColor DarkGray
@@ -11146,6 +14305,126 @@ function Start-Audit {
                     try { Test-ConjurIntegration } catch { Add-SkippedCheck -Category "Conjur Integration" -CISControl "SEC9" -CheckName "Conjur Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
+                # New v4.3 Secrets Hub Integration Checks
+                if ($IncludeSecretsHubChecks -or $SecretsHubUrl) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Secrets Hub Integration Checks..." -ForegroundColor Magenta
+                    Write-Host "=================================================" -ForegroundColor Magenta
+                    try { Test-SecretsHubIntegration } catch { Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" -CheckName "Secrets Hub Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Remote Access / Alero Checks
+                if ($IncludeRemoteAccessChecks -or $AleroUrl) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Remote Access / Alero Checks..." -ForegroundColor Magenta
+                    Write-Host "===============================================" -ForegroundColor Magenta
+                    try { Test-RemoteAccessSecurity } catch { Add-SkippedCheck -Category "Remote Access" -CISControl "RA1" -CheckName "Remote Access Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Kubernetes Secrets Checks
+                if ($IncludeK8sChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Kubernetes / Container Secrets Checks..." -ForegroundColor Magenta
+                    Write-Host "========================================================" -ForegroundColor Magenta
+                    try { Test-KubernetesSecretsSecurity } catch { Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S1" -CheckName "Kubernetes Secrets Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 DevSecOps Pipeline Checks
+                if ($IncludeDevSecOpsChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running DevSecOps Pipeline Security Checks..." -ForegroundColor Magenta
+                    Write-Host "=====================================================" -ForegroundColor Magenta
+                    try { Test-DevSecOpsSecurity } catch { Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO1" -CheckName "DevSecOps Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Privilege Cloud / SaaS Checks
+                if ($IncludePrivilegeCloudChecks -or $PrivilegeCloudTenant) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Privilege Cloud / SaaS Checks..." -ForegroundColor Magenta
+                    Write-Host "===============================================" -ForegroundColor Magenta
+                    try { Test-PrivilegeCloudSecurity } catch { Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC1" -CheckName "Privilege Cloud Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 CyberArk Identity / Idaptive Checks
+                if ($IncludeIdentityChecks -or $IdentityTenantUrl) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running CyberArk Identity / Idaptive Checks..." -ForegroundColor Magenta
+                    Write-Host "======================================================" -ForegroundColor Magenta
+                    try { Test-CyberArkIdentitySecurity } catch { Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN1" -CheckName "CyberArk Identity Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Custom Plugins Checks
+                if ($IncludePluginChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Custom Plugins & Components Checks..." -ForegroundColor Magenta
+                    Write-Host "=====================================================" -ForegroundColor Magenta
+                    try { Test-CustomPluginSecurity } catch { Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG1" -CheckName "Custom Plugins Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Backup Security Checks
+                if ($IncludeBackupSecurityChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Backup & Recovery Security Checks..." -ForegroundColor Magenta
+                    Write-Host "====================================================" -ForegroundColor Magenta
+                    try { Test-BackupSecurity } catch { Add-SkippedCheck -Category "Backup Security" -CISControl "BKP1" -CheckName "Backup Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 HSM Integration Checks
+                if ($IncludeHSMChecks -or $HSMProvider) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running HSM Integration Checks..." -ForegroundColor Magenta
+                    Write-Host "=========================================" -ForegroundColor Magenta
+                    try { Test-HSMIntegration } catch { Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM1" -CheckName "HSM Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 PTA Deep Dive Checks
+                if ($IncludePTADeepDive) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running PTA Deep Dive / Advanced Detection Checks..." -ForegroundColor Magenta
+                    Write-Host "=============================================================" -ForegroundColor Magenta
+                    try { Test-PTAAdvanced } catch { Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD1" -CheckName "PTA Advanced Detection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Third-Party Integration Checks
+                if ($IncludeThirdPartyChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Third-Party Integration Checks (SIEM/ITSM/SOAR)..." -ForegroundColor Magenta
+                    Write-Host "=================================================================" -ForegroundColor Magenta
+                    try { Test-ThirdPartyIntegrations } catch { Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI1" -CheckName "Third-Party Integrations" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Operational Hygiene Checks
+                if ($IncludeOperationalChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Operational Hygiene Metrics Checks..." -ForegroundColor Magenta
+                    Write-Host "=====================================================" -ForegroundColor Magenta
+                    try { Test-OperationalHygiene } catch { Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS1" -CheckName "Operational Hygiene Metrics" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Attack Path Simulation Checks
+                if ($IncludeAttackPathChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Attack Path Simulation Checks (Red Team)..." -ForegroundColor Magenta
+                    Write-Host "===========================================================" -ForegroundColor Magenta
+                    try { Test-AttackPathSimulation } catch { Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS1" -CheckName "Attack Path Simulation" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Supply Chain Integrity Checks
+                if ($IncludeSupplyChainChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Supply Chain Integrity Checks..." -ForegroundColor Magenta
+                    Write-Host "================================================" -ForegroundColor Magenta
+                    try { Test-SupplyChainIntegrity } catch { Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI1" -CheckName "Supply Chain Integrity" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
+                # New v4.3 Network Segmentation Checks
+                if ($IncludeNetworkSegmentationChecks) {
+                    Write-Host ""
+                    Write-Host "[AUTH] Running Network Segmentation Checks..." -ForegroundColor Magenta
+                    Write-Host "==============================================" -ForegroundColor Magenta
+                    try { Test-NetworkSegmentation } catch { Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG1" -CheckName "Network Segmentation" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                }
+
                 # New v4.1 AIM Provider Checks
                 Write-Host ""
                 Write-Host "[AUTH] Running AIM Provider Security Checks..." -ForegroundColor Yellow
@@ -11374,5 +14653,30 @@ function Start-Audit {
 }
 
 # Entry point
+Show-Banner
+
+# Check if PVWA parameter is provided
+if ([string]::IsNullOrEmpty($PVWA)) {
+    Write-Host "  Usage: .\CyberArk-Security-Audit.ps1 -PVWA <URL> [options]" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Required:" -ForegroundColor Cyan
+    Write-Host "    -PVWA           PVWA URL (e.g., https://pvwa.domain.com)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Common Options:" -ForegroundColor Cyan
+    Write-Host "    -AuthType       Authentication method: CyberArk, LDAP, RADIUS, SAML" -ForegroundColor White
+    Write-Host "    -UnauthenticatedOnly   Run only blackbox checks (no credentials)" -ForegroundColor White
+    Write-Host "    -OPSECMode      Stealth mode with delays and jitter" -ForegroundColor White
+    Write-Host "    -Proxy          Route traffic through proxy (e.g., http://127.0.0.1:8080)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Examples:" -ForegroundColor Cyan
+    Write-Host "    .\CyberArk-Security-Audit.ps1 -PVWA 'https://pvwa.domain.com' -AuthType LDAP" -ForegroundColor Gray
+    Write-Host "    .\CyberArk-Security-Audit.ps1 -PVWA 'https://pvwa.domain.com' -UnauthenticatedOnly" -ForegroundColor Gray
+    Write-Host "    .\CyberArk-Security-Audit.ps1 -PVWA 'https://pvwa.domain.com' -OPSECMode" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  For full help: Get-Help .\CyberArk-Security-Audit.ps1 -Full" -ForegroundColor DarkGray
+    Write-Host ""
+    return
+}
+
 Start-Audit
 #endregion

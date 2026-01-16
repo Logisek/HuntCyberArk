@@ -1,8 +1,28 @@
-# CyberArk Security Audit Suite v4.2 - Red Team Edition
+# CyberArk Security Audit Suite v4.3 - Security Posture Expansion
 
 A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. **Designed for offensive security professionals, red teamers, and penetration testers.**
 
-This tool performs extensive security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur).
+This tool performs extensive security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur). **v4.3 adds 86+ new checks across 15 security domains covering cloud-native secrets, Kubernetes, DevSecOps, and advanced threat detection.**
+
+## What's New in v4.3 (Security Posture Expansion)
+
+| Category | Prefix | Tests | Description |
+|----------|--------|-------|-------------|
+| **Secrets Hub** | SH1-SH6 | 6 | Cloud-native secrets sync to AWS/Azure/GCP |
+| **Remote Access** | RA1-RA6 | 6 | Vendor/Alero privileged access security |
+| **Kubernetes** | K8S1-K8S8 | 8 | Container secrets and Secrets Provider |
+| **DevSecOps** | DSO1-DSO6 | 6 | CI/CD pipeline security and secrets sprawl |
+| **Privilege Cloud** | PC1-PC5 | 5 | SaaS-specific connector and tenant checks |
+| **CyberArk Identity** | IDN1-IDN6 | 6 | SSO, adaptive MFA, lifecycle sync |
+| **Custom Plugins** | PLG1-PLG5 | 5 | PSM/CPM plugin security and signatures |
+| **Backup Security** | BKP1-BKP5 | 5 | Encryption, permissions, restoration testing |
+| **HSM Integration** | HSM1-HSM4 | 4 | Hardware security module connectivity |
+| **PTA Deep Dive** | PTAD1-PTAD6 | 6 | Detection rules, ML quality, alert fatigue |
+| **Third-Party Integration** | TPI1-TPI5 | 5 | SIEM, ITSM, SOAR connectivity |
+| **Operational Hygiene** | OPS1-OPS8 | 8 | Onboarding backlog, failures, metrics |
+| **Attack Path Simulation** | APS1-APS6 | 6 | PtH, NTLM relay, Kerberoasting |
+| **Supply Chain Integrity** | SCI1-SCI5 | 5 | File hashes, signatures, patch currency |
+| **Network Segmentation** | NSG1-NSG5 | 5 | Vault isolation, micro-segmentation |
 
 ## What's New in v4.2 (Red Team Edition)
 
@@ -222,6 +242,22 @@ Windows host hardening checks requiring local execution:
 | PVWA Hardening | PVWAH1 - PVWAH8 | WebDAV, IIS config, app pool, MIME types, cryptography |
 | CPM Hardening | CPMH1 - CPMH4 | FIPS, DEP, credential files, service accounts |
 | Application Control (Evasor) | APPCTL1 - APPCTL5 | DLL injection/hijacking, AppLocker bypasses |
+| **New in v4.3 (Security Posture Expansion)** | | |
+| Secrets Hub | SH1 - SH6 | Cloud secrets sync health, latency, version drift |
+| Remote Access / Alero | RA1 - RA6 | Vendor invitation, MFA, session limits, device binding |
+| Kubernetes Secrets | K8S1 - K8S8 | Secrets Provider, RBAC, pod security, Conjur follower |
+| DevSecOps Pipeline | DSO1 - DSO6 | CI/CD secrets retrieval, sprawl detection, short-lived tokens |
+| Privilege Cloud | PC1 - PC5 | Connector health, tenant isolation, ISP integration |
+| CyberArk Identity | IDN1 - IDN6 | SSO integration, adaptive MFA, session risk scoring |
+| Custom Plugins | PLG1 - PLG5 | PSM/CPM plugin security, digital signatures, ACLs |
+| Backup Security | BKP1 - BKP5 | Encryption, file permissions, restoration testing |
+| HSM Integration | HSM1 - HSM4 | HSM health, key wrapping, partition isolation |
+| PTA Deep Dive | PTAD1 - PTAD6 | Custom rules, ML quality, UEBA, alert fatigue |
+| Third-Party Integration | TPI1 - TPI5 | SIEM/ITSM/SOAR connectivity, credential health |
+| Operational Hygiene | OPS1 - OPS8 | Onboarding queue, CPM failures, PSM metrics, license |
+| Attack Path Simulation | APS1 - APS6 | PtH, NTLM relay, Kerberoasting, privilege escalation |
+| Supply Chain Integrity | SCI1 - SCI5 | File hashes, patch currency, code signing |
+| Network Segmentation | NSG1 - NSG5 | Vault isolation, component ACLs, East-West monitoring |
 
 ### Detailed Check Coverage
 
@@ -670,6 +706,87 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipHardeningChecks
 ```
 
+### v4.3 Scenarios (Security Posture Expansion)
+
+```powershell
+# Secrets Hub - Cloud secrets sync validation
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeSecretsHubChecks -SecretsHubUrl "https://secretshub.cyberark.cloud"
+
+# Remote Access / Alero - Vendor access security
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeRemoteAccessChecks -AleroUrl "https://alero.cyberark.cloud"
+
+# Kubernetes Secrets - Container security and Secrets Provider
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeK8sChecks -K8sNamespace "cyberark" -ConjurApplianceUrl "https://conjur.domain.com"
+
+# DevSecOps - CI/CD pipeline security
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeDevSecOpsChecks
+
+# Privilege Cloud - SaaS-specific checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludePrivilegeCloudChecks -PrivilegeCloudTenant "my-tenant"
+
+# CyberArk Identity - SSO and adaptive MFA
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeIdentityChecks -IdentityTenantUrl "https://aab1234.id.cyberark.cloud"
+
+# Backup Security - Encryption and file permissions
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeBackupSecurityChecks -BackupPath "D:\VaultBackups"
+
+# HSM Integration - Hardware security module checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeHSMChecks -HSMProvider "Thales"
+
+# PTA Deep Dive - Advanced threat detection analysis
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludePTADeepDive
+
+# Third-Party Integration - SIEM/ITSM/SOAR connectivity
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeThirdPartyChecks -ServiceNowUrl "https://company.servicenow.com" -SIEMUrl "https://splunk.domain.com"
+
+# Operational Hygiene - Health metrics and queue analysis
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeOperationalChecks
+
+# Attack Path Simulation - Red team validation
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeAttackPathChecks -IncludeADChecks
+
+# Supply Chain Integrity - Component validation
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeSupplyChainChecks
+
+# Network Segmentation - Micro-segmentation analysis
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -IncludeNetworkSegmentationChecks
+
+# Comprehensive v4.3 audit with all new checks
+.\CyberArk-Security-Audit.ps1 `
+    -PVWA "https://pvwa.domain.com" `
+    -AuthType LDAP `
+    -IncludeSecretsHubChecks `
+    -IncludeRemoteAccessChecks `
+    -IncludeK8sChecks `
+    -IncludeDevSecOpsChecks `
+    -IncludePrivilegeCloudChecks `
+    -IncludeIdentityChecks `
+    -IncludePluginChecks `
+    -IncludeBackupSecurityChecks `
+    -IncludeHSMChecks `
+    -IncludePTADeepDive `
+    -IncludeThirdPartyChecks `
+    -IncludeOperationalChecks `
+    -IncludeAttackPathChecks `
+    -IncludeSupplyChainChecks `
+    -IncludeNetworkSegmentationChecks `
+    -ComplianceMapping
+```
+
 ## Parameters
 
 | Parameter | Required | Default | Description |
@@ -717,6 +834,32 @@ $cred = Get-Credential
 | QuietMode | No | False | Reduce console output (info messages suppressed) |
 | **EPM Parameters** | | | |
 | EPMUrl | No | - | EPM server URL for EPM integration checks |
+| **New in v4.3 Parameters (Security Posture Expansion)** | | | |
+| IncludeSecretsHubChecks | No | False | Enable Secrets Hub cloud sync checks |
+| SecretsHubUrl | No | - | Secrets Hub URL for integration checks |
+| IncludeRemoteAccessChecks | No | False | Enable Remote Access/Alero checks |
+| AleroUrl | No | - | Alero URL for vendor access checks |
+| IncludeK8sChecks | No | False | Enable Kubernetes/Container secrets checks |
+| K8sNamespace | No | - | Kubernetes namespace for secrets checks |
+| ConjurApplianceUrl | No | - | Conjur appliance URL for K8s integration |
+| IncludeDevSecOpsChecks | No | False | Enable DevSecOps pipeline security checks |
+| IncludePrivilegeCloudChecks | No | False | Enable Privilege Cloud/SaaS checks |
+| PrivilegeCloudTenant | No | - | Privilege Cloud tenant identifier |
+| IncludeIdentityChecks | No | False | Enable CyberArk Identity/Idaptive checks |
+| IdentityTenantUrl | No | - | CyberArk Identity tenant URL |
+| IncludePluginChecks | No | False | Enable custom plugin security checks |
+| IncludeBackupSecurityChecks | No | False | Enable backup security checks |
+| BackupPath | No | - | Path to Vault backup files for analysis |
+| IncludeHSMChecks | No | False | Enable HSM integration checks |
+| HSMProvider | No | - | HSM provider type (Thales, Entrust, etc.) |
+| IncludePTADeepDive | No | False | Enable advanced PTA detection checks |
+| IncludeThirdPartyChecks | No | False | Enable SIEM/ITSM/SOAR integration checks |
+| ServiceNowUrl | No | - | ServiceNow URL for ITSM checks |
+| SIEMUrl | No | - | SIEM URL for event correlation checks |
+| IncludeOperationalChecks | No | False | Enable operational hygiene metrics |
+| IncludeAttackPathChecks | No | False | Enable attack path simulation checks |
+| IncludeSupplyChainChecks | No | False | Enable supply chain integrity checks |
+| IncludeNetworkSegmentationChecks | No | False | Enable network segmentation checks |
 | **Other Parameters** | | | |
 | PortScanTimeout | No | 1000 | Port scan connection timeout (ms) |
 | VerboseOutput | No | False | Enable verbose logging |
@@ -937,6 +1080,54 @@ If you encounter issues not covered above:
 This tool is provided as-is for security assessment purposes. Use responsibly and ethically.
 
 ## Changelog
+
+### Version 4.3 (Security Posture Expansion)
+Major update expanding security check coverage with 86+ new tests across 15 security domains:
+
+**New Check Categories (v4.3):**
+
+| Category | Controls | Description |
+|----------|----------|-------------|
+| **Secrets Hub** | SH1-SH6 | Cloud-native secrets sync validation for AWS Secrets Manager, Azure Key Vault, GCP Secret Manager |
+| **Remote Access / Alero** | RA1-RA6 | Vendor privileged access security including MFA enforcement, session limits, biometric binding |
+| **Kubernetes Secrets** | K8S1-K8S8 | Container secrets security with Secrets Provider, RBAC, pod security context, Conjur follower health |
+| **DevSecOps Pipeline** | DSO1-DSO6 | CI/CD security including secrets retrieval patterns, sprawl detection, short-lived token usage |
+| **Privilege Cloud** | PC1-PC5 | SaaS-specific checks for connector health, ISP integration, tenant isolation |
+| **CyberArk Identity** | IDN1-IDN6 | SSO integration, adaptive MFA policies, session risk scoring, identity lifecycle sync |
+| **Custom Plugins** | PLG1-PLG5 | PSM/CPM plugin security, digital signature validation, script file permissions |
+| **Backup Security** | BKP1-BKP5 | Vault backup encryption, file permissions, in-transit security, restoration testing |
+| **HSM Integration** | HSM1-HSM4 | Hardware security module health, key wrapping, partition isolation, firmware currency |
+| **PTA Deep Dive** | PTAD1-PTAD6 | Advanced threat detection rules, ML model quality, UEBA, automated response actions |
+| **Third-Party Integration** | TPI1-TPI5 | SIEM event correlation, ITSM ticketing, SOAR playbooks, log forwarder health |
+| **Operational Hygiene** | OPS1-OPS8 | Onboarding queue metrics, CPM failure rates, PSM sessions, Vault capacity, license compliance |
+| **Attack Path Simulation** | APS1-APS6 | Red team validation including PtH, NTLM relay, Kerberoasting, privilege escalation paths |
+| **Supply Chain Integrity** | SCI1-SCI5 | Component file hashes, patch currency, third-party library vulnerabilities, code signing |
+| **Network Segmentation** | NSG1-NSG5 | Vault isolation, component ACLs, East-West traffic monitoring, micro-segmentation |
+
+**New Parameters:**
+- `-IncludeSecretsHubChecks`, `-SecretsHubUrl`: Secrets Hub cloud sync validation
+- `-IncludeRemoteAccessChecks`, `-AleroUrl`: Remote Access/Alero security
+- `-IncludeK8sChecks`, `-K8sNamespace`, `-ConjurApplianceUrl`: Kubernetes secrets security
+- `-IncludeDevSecOpsChecks`: DevSecOps pipeline security
+- `-IncludePrivilegeCloudChecks`, `-PrivilegeCloudTenant`: Privilege Cloud SaaS checks
+- `-IncludeIdentityChecks`, `-IdentityTenantUrl`: CyberArk Identity/Idaptive integration
+- `-IncludePluginChecks`: Custom PSM/CPM plugin security
+- `-IncludeBackupSecurityChecks`, `-BackupPath`: Backup encryption and permissions
+- `-IncludeHSMChecks`, `-HSMProvider`: HSM integration validation
+- `-IncludePTADeepDive`: Advanced PTA threat detection analysis
+- `-IncludeThirdPartyChecks`, `-ServiceNowUrl`, `-SIEMUrl`: SIEM/ITSM/SOAR integration
+- `-IncludeOperationalChecks`: Operational hygiene and health metrics
+- `-IncludeAttackPathChecks`: Attack path simulation (red team validation)
+- `-IncludeSupplyChainChecks`: Supply chain integrity verification
+- `-IncludeNetworkSegmentationChecks`: Network micro-segmentation analysis
+
+**Key Improvements:**
+- Comprehensive coverage of modern CyberArk deployments (cloud-native, SaaS, Kubernetes)
+- Enhanced DevSecOps integration for CI/CD pipeline security
+- Red team-focused attack path simulation checks
+- Supply chain integrity validation for component authenticity
+- Operational health metrics for proactive monitoring
+- All new categories include detailed remediation recommendations
 
 ### Version 4.2 (Red Team Edition)
 Major update with offensive security enhancements for penetration testers and red teamers:
