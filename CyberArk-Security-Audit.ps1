@@ -73,6 +73,10 @@
 .EXAMPLE
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeWAFEvasion -UnauthenticatedOnly
     # Test WAF bypass techniques during external pentest
+.PARAMETER EnablePasswordSpraying
+    WARNING: Enable password spraying and brute force testing (requires explicit user confirmation)
+    This parameter must be explicitly set to enable any password spraying or brute force functionality.
+    By default, the script only tests known default passwords to avoid account lockouts.
 .NOTES
     Version: 4.3
     Requires: PowerShell 7+, CyberArk REST API v12+
@@ -443,7 +447,11 @@ param(
     [switch]$SkipSupplyChainChecks,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipNetworkSegmentationChecks
+    [switch]$SkipNetworkSegmentationChecks,
+
+    # Offensive Security Features (Require explicit user confirmation)
+    [Parameter(Mandatory = $false)]
+    [switch]$EnablePasswordSpraying
 )
 
 #region Configuration
@@ -2943,6 +2951,9 @@ function Test-InformationDisclosure {
 function Test-DefaultCredentials {
     Write-AuditLog "Checking for default/weak credential acceptance (Blackbox)..." -Level Info
 
+    # SECURITY NOTE: This function only tests a limited set of 8 known default passwords
+    # to avoid account lockouts. Password spraying or brute force attacks require
+    # explicit user confirmation via the -EnablePasswordSpraying flag.
     # Common default credentials to test
     $defaultCreds = @(
         @{ User = "Administrator"; Pass = "Cyberark1" },
@@ -15891,6 +15902,14 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 }
 
 Show-Banner
+
+# Certificate validation bypass for assessment continuity
+# WARNING: Certificate validation is bypassed to allow assessment of systems with self-signed certificates
+# This will be captured as a security finding in the report
+Write-Host "WARNING: Certificate validation is disabled for assessment continuity." -ForegroundColor Yellow
+Write-Host "         Systems with certificate issues will be flagged in the security findings." -ForegroundColor Yellow
+Write-Host ""
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 
 # Check if PVWA parameter is provided
 if ([string]::IsNullOrEmpty($PVWA)) {

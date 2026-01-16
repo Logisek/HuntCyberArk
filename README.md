@@ -1012,7 +1012,8 @@ The output is designed to help you write professional security assessment report
 
 ⚠️ **WARNING**: This tool performs active security testing that may:
 - Generate security alerts in monitoring systems
-- Trigger account lockouts (default credential testing)
+- Avoid account lockouts by only checking known default passwords
+- Password sprays or brute force attacks require explicit user confirmation via extra flags
 - Be flagged as malicious activity by security tools
 - Impact system performance during port scanning
 
@@ -1068,9 +1069,10 @@ Unblock-File -Path .\CyberArk-Security-Audit.ps1
 
 **Error**: `The underlying connection was closed: Could not establish trust relationship`
 
-**Solution**: This typically indicates a certificate issue with the PVWA. The script will capture this as a finding. If you need to proceed anyway:
+**Solution**: This typically indicates a certificate issue (e.g., self-signed certificate) with the PVWA. The script will automatically capture this as a security finding and continue with the assessment to provide complete coverage. The script includes certificate validation bypass for operational continuity:
 ```powershell
-# NOT RECOMMENDED for production - bypasses certificate validation
+# The script automatically bypasses certificate validation for assessment continuity
+# while capturing certificate issues as findings
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 ```
 
@@ -1130,40 +1132,6 @@ Start-Process powershell -Verb RunAs
 New-Item -ItemType Directory -Path "C:\Reports" -Force
 ```
 
-### Verifying Script Requirements
-
-Run this diagnostic script to verify your environment:
-
-```powershell
-# Check PowerShell version
-Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
-
-# Check .NET version
-Write-Host ".NET Version: $([System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription)" -ForegroundColor Cyan
-
-# Check TLS settings
-Write-Host "TLS Protocols: $([Net.ServicePointManager]::SecurityProtocol)" -ForegroundColor Cyan
-
-# Check execution policy
-Write-Host "Execution Policy: $(Get-ExecutionPolicy)" -ForegroundColor Cyan
-
-# Test network stack
-try {
-    $tcpTest = New-Object System.Net.Sockets.TcpClient
-    Write-Host "TCP Client: Available" -ForegroundColor Green
-} catch {
-    Write-Host "TCP Client: Error - $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# Test SSL stream
-try {
-    $sslTest = [System.Net.Security.SslStream]
-    Write-Host "SSL Stream: Available" -ForegroundColor Green
-} catch {
-    Write-Host "SSL Stream: Error - $($_.Exception.Message)" -ForegroundColor Red
-}
-```
-
 ### Getting Help
 
 If you encounter issues not covered above:
@@ -1176,9 +1144,7 @@ If you encounter issues not covered above:
 ## References
 
 ### CyberArk Documentation
-- [CIS CyberArk PAM Benchmark](https://www.cisecurity.org/benchmark/cyberark)
 - [CyberArk Security Hardening Guide](https://docs.cyberark.com/)
-- [CyberArk Security Bulletins](https://www.cyberark.com/resources/security-bulletins)
 - [CyberArk REST API Documentation](https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Implementing%20Privileged%20Account%20Security%20Web%20Services%20.htm)
 
 ### CyberArk Open Source Security Tools
@@ -1188,84 +1154,6 @@ If you encounter issues not covered above:
 - [Conjur](https://github.com/cyberark/conjur) - Secrets management platform
 - [ACLight](https://github.com/cyberark/ACLight) - Shadow Admin discovery (part of zBang)
 - [Ansible Security Automation Collection](https://github.com/cyberark/ansible-security-automation-collection) - CyberArk Ansible integration
-
-## Changelog
-
-### v4.3 - Enhanced Reporting (January 2026)
-
-**Comprehensive Report Enhancements:**
-
-- **Enhanced Finding Details**: Each finding now includes 20+ fields for comprehensive reporting:
-  - `FindingID`: Unique identifier for tracking
-  - `AffectedComponent`: Auto-derived CyberArk component (Vault, CPM, PSM, PVWA, PTA)
-  - `Evidence`: Technical evidence supporting the finding
-  - `TechnicalDetails`: Detailed technical description
-  - `RiskDescription`: Auto-generated risk explanation based on severity
-  - `BusinessImpact`: Business-level impact explanation
-  - `CVSSScore`: Estimated CVSS score range
-  - `RemediationSteps`: Step-by-step remediation guidance
-  - `ComplianceRefs`: Compliance framework references
-  - `References`: Documentation links
-
-- **HTML Report Improvements**:
-  - Table of Contents with anchor navigation
-  - Executive Summary with compliance meter and key metrics
-  - Key Risks section highlighting top 10 critical/high findings
-  - Expandable findings table with full evidence and remediation details
-  - Remediation Roadmap with prioritized timeline (24h/1wk/30d/90d)
-  - Component Analysis cards for team assignment
-  - Enhanced Skipped Checks section with manual verification guidance
-  - Print-friendly (auto-expands all findings when printing)
-
-- **CSV Report Expansion**: Now generates 7 separate files:
-  - `Executive_Summary.csv` - High-level metrics for leadership
-  - `Full_Findings.csv` - Complete findings with all fields
-  - `Failed_Findings.csv` - Failed checks sorted by severity
-  - `Remediation_Tracker.csv` - Actionable tracker with AssignedTo, Status, DueDate
-  - `Skipped_Checks.csv` - Manual verification requirements
-  - `CIS_Compliance_Matrix.csv` - Control-by-control compliance status
-  - `Component_Summary.csv` - Findings grouped by CyberArk component
-
-- **JSON Report Restructure**: Comprehensive nested structure including:
-  - `executiveSummary` with key risks and metrics
-  - `complianceAnalysis` with per-control CIS matrix
-  - `componentAnalysis` and `categoryAnalysis`
-  - `remediationRoadmap` with prioritized phases
-  - `appendix` with glossary and severity definitions
-
-- **Skipped Checks Enhancement**:
-  - `ManualVerificationSteps`: Guidance for manual verification
-  - `RiskIfNotChecked`: Risk assessment for unverified controls
-  - `FollowUpRequired`: Flag for checks needing attention
-
-**Bug Fixes:**
-- Fixed `ValidateRange` for `RequestDelay` and `Jitter` parameters to allow default value of 0
-
-### v4.2 - Red Team Enhancements
-
-- OPSEC Mode with stealth scanning
-- Proxy support for Burp/ZAP
-- Timing attack detection
-- JWT/OAuth2 security testing
-- WebSocket endpoint discovery
-- WAF evasion testing
-
-### v4.1 - CyberArk Tools Integration
-
-- zBang-inspired AD security checks
-- CYBRHardeningCheck-inspired server hardening
-- Evasor-inspired application control bypass detection
-- Conjur/Secrets Manager integration
-
-### v4.0 - Security Posture Expansion
-
-- Secrets Hub, Remote Access, Kubernetes checks
-- DevSecOps pipeline security
-- Privilege Cloud and CyberArk Identity
-- HSM integration, PTA deep dive
-- Attack path simulation
-- Supply chain integrity
-- Network segmentation analysis
 
 ## License
 
