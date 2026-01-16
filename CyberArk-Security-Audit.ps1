@@ -75,7 +75,7 @@
     # Test WAF bypass techniques during external pentest
 .NOTES
     Version: 4.3
-    Requires: PowerShell 5.1+, CyberArk REST API v12+
+    Requires: PowerShell 7+, CyberArk REST API v12+
     Author: Security Assessment Team
     CIS Benchmark Reference: CIS CyberArk PAM Benchmark v1.0
     Vendor Reference: CyberArk Security Hardening Guide, CyberArk Best Practices
@@ -141,6 +141,8 @@
     
     Use -OPSECMode for reduced detection footprint during red team operations.
 #>
+
+#Requires -Version 7.0
 
 [CmdletBinding()]
 param(
@@ -918,45 +920,18 @@ function Show-Banner {
     #>
     Write-Host ""
     
-    $asciiArt = @"
-██╗  ██╗██╗   ██╗███╗   ██╗████████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗  █████╗ ██████╗ ██╗  ██╗
-██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝
-███████║██║   ██║██╔██╗ ██║   ██║   ██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝███████║██████╔╝█████╔╝ 
-██╔══██║██║   ██║██║╚██╗██║   ██║   ██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗██╔══██║██╔══██╗██╔═██╗ 
-██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗
-╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-"@
-    
-    # Try to use ANSI colors if available (PowerShell supports ANSI by default on modern systems)
-    try {
-        # Check if ANSI escape sequences are supported
-        if ($Host.UI.SupportsVirtualTerminal) {
-            # ANSI color codes: Bright Magenta for ASCII art, Yellow for title
-            $magenta = "`e[95m"
-            $yellow = "`e[33m"
-            $red = "`e[31m"
-            $reset = "`e[0m"
-            
-            Write-Host "${magenta}${asciiArt}${reset}"
-            Write-Host "${yellow}    CyberArk PAM Security Configuration Audit${reset}"
-            Write-Host "${red}    Red Team / Offensive Security Edition${reset}"
-        }
-        else {
-            # Fallback to PowerShell colors
-            Write-Host $asciiArt -ForegroundColor Magenta
-            Write-Host "    CyberArk PAM Security Configuration Audit" -ForegroundColor Yellow
-            Write-Host "    Red Team / Offensive Security Edition" -ForegroundColor Red
-        }
-    }
-    catch {
-        # Fallback without colors
-        Write-Host $asciiArt
-        Write-Host "    CyberArk PAM Security Configuration Audit"
-        Write-Host "    Red Team / Offensive Security Edition"
-    }
-    
-    Write-Host "    https://github.com/yourrepo/HuntCyberArk"
-    Write-Host "    Version 4.3"
+    # Use PowerShell native colors for maximum compatibility (works on PS 5.1+)
+    Write-Host "██╗  ██╗██╗   ██╗███╗   ██╗████████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗  █████╗ ██████╗ ██╗  ██╗" -ForegroundColor Magenta
+    Write-Host "██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝" -ForegroundColor Magenta
+    Write-Host "███████║██║   ██║██╔██╗ ██║   ██║   ██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝███████║██████╔╝█████╔╝ " -ForegroundColor Magenta
+    Write-Host "██╔══██║██║   ██║██║╚██╗██║   ██║   ██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗██╔══██║██╔══██╗██╔═██╗ " -ForegroundColor Magenta
+    Write-Host "██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗" -ForegroundColor Magenta
+    Write-Host "╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
+    Write-Host ""
+    Write-Host "    CyberArk PAM Security Configuration Audit" -ForegroundColor Yellow
+    Write-Host "    Red Team / Offensive Security Edition" -ForegroundColor Red
+    Write-Host "    https://github.com/yourrepo/HuntCyberArk" -ForegroundColor DarkGray
+    Write-Host "    Version 4.3" -ForegroundColor DarkGray
     Write-Host ""
 }
 #endregion
@@ -14653,6 +14628,21 @@ function Start-Audit {
 }
 
 # Entry point
+
+# Require PowerShell 7+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host ""
+    Write-Host "ERROR: This script requires PowerShell 7 or higher." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Current version: PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "To install PowerShell 7:" -ForegroundColor Cyan
+    Write-Host "  Windows: winget install Microsoft.PowerShell" -ForegroundColor White
+    Write-Host "  Or download from: https://github.com/PowerShell/PowerShell/releases" -ForegroundColor White
+    Write-Host ""
+    return
+}
+
 Show-Banner
 
 # Check if PVWA parameter is provided
