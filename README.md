@@ -1012,7 +1012,8 @@ The output is designed to help you write professional security assessment report
 
 ⚠️ **WARNING**: This tool performs active security testing that may:
 - Generate security alerts in monitoring systems
-- Trigger account lockouts (default credential testing)
+- Avoid account lockouts by only checking known default passwords
+- Password sprays or brute force attacks require explicit user confirmation via extra flags
 - Be flagged as malicious activity by security tools
 - Impact system performance during port scanning
 
@@ -1068,9 +1069,10 @@ Unblock-File -Path .\CyberArk-Security-Audit.ps1
 
 **Error**: `The underlying connection was closed: Could not establish trust relationship`
 
-**Solution**: This typically indicates a certificate issue with the PVWA. The script will capture this as a finding. If you need to proceed anyway:
+**Solution**: This typically indicates a certificate issue (e.g., self-signed certificate) with the PVWA. The script will automatically capture this as a security finding and continue with the assessment to provide complete coverage. The script includes certificate validation bypass for operational continuity:
 ```powershell
-# NOT RECOMMENDED for production - bypasses certificate validation
+# The script automatically bypasses certificate validation for assessment continuity
+# while capturing certificate issues as findings
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 ```
 
@@ -1142,9 +1144,7 @@ If you encounter issues not covered above:
 ## References
 
 ### CyberArk Documentation
-- [CIS CyberArk PAM Benchmark](https://www.cisecurity.org/benchmark/cyberark)
 - [CyberArk Security Hardening Guide](https://docs.cyberark.com/)
-- [CyberArk Security Bulletins](https://www.cyberark.com/resources/security-bulletins)
 - [CyberArk REST API Documentation](https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Implementing%20Privileged%20Account%20Security%20Web%20Services%20.htm)
 
 ### CyberArk Open Source Security Tools
