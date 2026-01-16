@@ -27,6 +27,10 @@ This tool performs 200+ security checks including CIS Benchmark compliance, vend
 - [Usage](#usage)
 - [Parameters](#parameters)
 - [Output](#output)
+  - [HTML Report](#1-html-report-interactive-dashboard)
+  - [CSV Reports](#2-csv-reports-7-separate-files)
+  - [JSON Report](#3-json-report-structured-data)
+  - [Risk Scoring](#risk-scoring)
 - [Security Considerations](#security-considerations)
 - [Known Vulnerable CyberArk Versions](#known-vulnerable-cyberark-versions)
 - [Troubleshooting](#troubleshooting)
@@ -688,6 +692,50 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipHardeningChecks
 ```
 
+### Reporting & Output Scenarios
+
+```powershell
+# Generate comprehensive reports to a specific directory
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -OutputPath "C:\SecurityReports\CyberArk"
+
+# Quick unauthenticated scan with minimal output for automation
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" `
+    -UnauthenticatedOnly -QuietMode -NoLogo `
+    -OutputPath "C:\Reports"
+
+# Full audit for compliance reporting
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
+    -ComplianceMapping -OutputPath "C:\ComplianceReports"
+
+# Generate reports and capture results for further processing
+$auditResults = .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP
+
+# Access the returned data programmatically
+$auditResults.ReportMetadata.RiskScore
+$auditResults.Findings | Where-Object { $_.Severity -eq "Critical" }
+$auditResults.Reports.HTML  # Path to HTML report
+$auditResults.Reports.CSV   # Array of CSV file paths
+$auditResults.Reports.JSON  # Path to JSON report
+```
+
+**Output Files Generated:**
+
+After running an audit, you'll find these files in your output directory:
+
+```
+C:\SecurityReports\CyberArk\
+├── CyberArk_Security_Audit_20260116_143022.html          # Interactive HTML dashboard
+├── CyberArk_Security_Audit_20260116_143022.json          # Comprehensive JSON data
+├── CyberArk_Security_Audit_20260116_143022_Executive_Summary.csv
+├── CyberArk_Security_Audit_20260116_143022_Full_Findings.csv
+├── CyberArk_Security_Audit_20260116_143022_Failed_Findings.csv
+├── CyberArk_Security_Audit_20260116_143022_Remediation_Tracker.csv
+├── CyberArk_Security_Audit_20260116_143022_Skipped_Checks.csv
+├── CyberArk_Security_Audit_20260116_143022_CIS_Compliance_Matrix.csv
+└── CyberArk_Security_Audit_20260116_143022_Component_Summary.csv
+```
+
 ### Security Posture Expansion Scenarios
 
 ```powershell
@@ -848,26 +896,117 @@ $cred = Get-Credential
 
 ## Output
 
-The script generates three report formats:
+The script generates comprehensive reports in three formats, designed to support writing detailed security assessment reports:
 
-1. **HTML Report**: Interactive dashboard with filtering, risk scoring, and remediation priorities
-2. **CSV Report**: Tabular data for spreadsheet analysis
-3. **JSON Report**: Structured data for integration with other tools
+### Report Formats
+
+#### 1. HTML Report (Interactive Dashboard)
+
+A modern, interactive HTML report with:
+
+- **Table of Contents**: Quick navigation to all report sections
+- **Executive Summary**: Overall risk rating, compliance percentage, key metrics
+- **Key Risks Section**: Top 10 critical/high findings with business impact
+- **CIS Benchmark Compliance Matrix**: Control-by-control compliance status
+- **Detailed Findings Table**: Expandable rows with full evidence and remediation steps
+  - Click any finding to reveal: evidence, technical details, risk description, business impact, CVSS score, remediation steps, and references
+- **Remediation Roadmap**: Prioritized timeline (24h/1wk/30d/90d)
+- **Component Analysis**: Findings grouped by CyberArk component (Vault, CPM, PSM, PVWA, PTA)
+- **Skipped Checks**: Manual verification requirements with follow-up guidance
+- **Print-friendly**: Auto-expands all findings when printing
+
+#### 2. CSV Reports (7 Separate Files)
+
+Generates multiple CSV files for different audiences:
+
+| File | Purpose | Audience |
+|------|---------|----------|
+| `Executive_Summary.csv` | High-level metrics and risk overview | Leadership, Management |
+| `Full_Findings.csv` | Complete findings with all 20+ fields | Security Analysts |
+| `Failed_Findings.csv` | Failed checks only, sorted by severity | Remediation Teams |
+| `Remediation_Tracker.csv` | Actionable tracker with AssignedTo, Status, DueDate | IT Operations |
+| `Skipped_Checks.csv` | Checks requiring manual verification | Auditors |
+| `CIS_Compliance_Matrix.csv` | Control-by-control compliance status | Compliance Officers |
+| `Component_Summary.csv` | Findings grouped by component | Component Owners |
+
+#### 3. JSON Report (Structured Data)
+
+Comprehensive structured data for programmatic analysis:
+
+```json
+{
+  "reportInfo": { "title", "generatedAt", "version" },
+  "auditMetadata": { "target", "auditDate", "auditorInfo" },
+  "executiveSummary": {
+    "overallRiskRating": "Fair",
+    "riskScore": 45,
+    "keyMetrics": { "totalChecks", "passed", "failed", "compliance%" },
+    "findingsBySeverity": { "critical", "high", "medium", "low" },
+    "keyRisks": [ /* top 10 findings */ ],
+    "immediatePriorities": [ /* critical recommendations */ ]
+  },
+  "complianceAnalysis": {
+    "overallCompliance": 78.5,
+    "cisControlsCompliance": { /* per-control matrix */ }
+  },
+  "componentAnalysis": { /* findings by component */ },
+  "categoryAnalysis": { /* findings by category */ },
+  "remediationRoadmap": {
+    "immediate": { "timeframe": "24-48 hours", "findings": [] },
+    "urgent": { "timeframe": "1 week", "findings": [] },
+    "standard": { "timeframe": "30 days", "findings": [] },
+    "routine": { "timeframe": "90 days", "findings": [] }
+  },
+  "detailedFindings": { "failed", "passed", "all" },
+  "skippedChecks": { "summary", "requiresFollowUp", "all" },
+  "appendix": { "glossary", "severityDefinitions", "riskScoreExplanation" }
+}
+```
+
+### Enhanced Finding Details
+
+Each finding now includes comprehensive information for report writing:
+
+| Field | Description |
+|-------|-------------|
+| `FindingID` | Unique identifier (e.g., CA-20260116-A1B2C3D4) |
+| `Category` | Security category (e.g., Safe Configuration, Authentication) |
+| `CISControl` | CIS Benchmark control reference |
+| `AffectedComponent` | CyberArk component (Vault, CPM, PSM, PVWA, PTA) |
+| `Evidence` | Technical evidence supporting the finding |
+| `TechnicalDetails` | Detailed technical description |
+| `RiskDescription` | Explanation of why this is a security risk |
+| `BusinessImpact` | Business-level impact explanation |
+| `CVSSScore` | Estimated CVSS score range |
+| `RemediationSteps` | Step-by-step remediation guidance |
+| `ComplianceRefs` | Compliance framework references |
+| `References` | Documentation links |
 
 ### Risk Scoring
 
 Findings are scored by severity:
-- **Critical**: 40 points
-- **High**: 20 points
-- **Medium**: 5 points
-- **Low**: 1 point
+- **Critical**: 40 points (Immediate action required)
+- **High**: 20 points (Priority remediation within 1 week)
+- **Medium**: 5 points (Address within 30 days)
+- **Low**: 1 point (Address within 90 days)
 
 Risk ratings:
-- **Excellent**: 0 points
-- **Good**: 1-19 points
-- **Fair**: 20-49 points
-- **Poor**: 50-99 points
-- **Critical**: 100+ points
+- **Excellent**: 0 points (No security issues)
+- **Good**: 1-19 points (Minor issues only)
+- **Fair**: 20-49 points (Some issues require attention)
+- **Poor**: 50-99 points (Significant issues)
+- **Critical**: 100+ points (Immediate action required)
+
+### Writing Comprehensive Reports
+
+The output is designed to help you write professional security assessment reports:
+
+1. **Use the Executive Summary** for management briefings
+2. **Reference the CIS Compliance Matrix** for compliance sections
+3. **Copy Evidence and Technical Details** for technical appendices
+4. **Use the Remediation Roadmap** for the recommendations section
+5. **Include Component Analysis** for team-specific action items
+6. **Track remediation** using the CSV Remediation Tracker
 
 ## Security Considerations
 
@@ -1050,12 +1189,83 @@ If you encounter issues not covered above:
 - [ACLight](https://github.com/cyberark/ACLight) - Shadow Admin discovery (part of zBang)
 - [Ansible Security Automation Collection](https://github.com/cyberark/ansible-security-automation-collection) - CyberArk Ansible integration
 
-### Security Standards
-- [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
-- [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
+## Changelog
 
-### General
-- [PowerShell Documentation](https://docs.microsoft.com/en-us/powershell/)
+### v4.3 - Enhanced Reporting (January 2026)
+
+**Comprehensive Report Enhancements:**
+
+- **Enhanced Finding Details**: Each finding now includes 20+ fields for comprehensive reporting:
+  - `FindingID`: Unique identifier for tracking
+  - `AffectedComponent`: Auto-derived CyberArk component (Vault, CPM, PSM, PVWA, PTA)
+  - `Evidence`: Technical evidence supporting the finding
+  - `TechnicalDetails`: Detailed technical description
+  - `RiskDescription`: Auto-generated risk explanation based on severity
+  - `BusinessImpact`: Business-level impact explanation
+  - `CVSSScore`: Estimated CVSS score range
+  - `RemediationSteps`: Step-by-step remediation guidance
+  - `ComplianceRefs`: Compliance framework references
+  - `References`: Documentation links
+
+- **HTML Report Improvements**:
+  - Table of Contents with anchor navigation
+  - Executive Summary with compliance meter and key metrics
+  - Key Risks section highlighting top 10 critical/high findings
+  - Expandable findings table with full evidence and remediation details
+  - Remediation Roadmap with prioritized timeline (24h/1wk/30d/90d)
+  - Component Analysis cards for team assignment
+  - Enhanced Skipped Checks section with manual verification guidance
+  - Print-friendly (auto-expands all findings when printing)
+
+- **CSV Report Expansion**: Now generates 7 separate files:
+  - `Executive_Summary.csv` - High-level metrics for leadership
+  - `Full_Findings.csv` - Complete findings with all fields
+  - `Failed_Findings.csv` - Failed checks sorted by severity
+  - `Remediation_Tracker.csv` - Actionable tracker with AssignedTo, Status, DueDate
+  - `Skipped_Checks.csv` - Manual verification requirements
+  - `CIS_Compliance_Matrix.csv` - Control-by-control compliance status
+  - `Component_Summary.csv` - Findings grouped by CyberArk component
+
+- **JSON Report Restructure**: Comprehensive nested structure including:
+  - `executiveSummary` with key risks and metrics
+  - `complianceAnalysis` with per-control CIS matrix
+  - `componentAnalysis` and `categoryAnalysis`
+  - `remediationRoadmap` with prioritized phases
+  - `appendix` with glossary and severity definitions
+
+- **Skipped Checks Enhancement**:
+  - `ManualVerificationSteps`: Guidance for manual verification
+  - `RiskIfNotChecked`: Risk assessment for unverified controls
+  - `FollowUpRequired`: Flag for checks needing attention
+
+**Bug Fixes:**
+- Fixed `ValidateRange` for `RequestDelay` and `Jitter` parameters to allow default value of 0
+
+### v4.2 - Red Team Enhancements
+
+- OPSEC Mode with stealth scanning
+- Proxy support for Burp/ZAP
+- Timing attack detection
+- JWT/OAuth2 security testing
+- WebSocket endpoint discovery
+- WAF evasion testing
+
+### v4.1 - CyberArk Tools Integration
+
+- zBang-inspired AD security checks
+- CYBRHardeningCheck-inspired server hardening
+- Evasor-inspired application control bypass detection
+- Conjur/Secrets Manager integration
+
+### v4.0 - Security Posture Expansion
+
+- Secrets Hub, Remote Access, Kubernetes checks
+- DevSecOps pipeline security
+- Privilege Cloud and CyberArk Identity
+- HSM integration, PTA deep dive
+- Attack path simulation
+- Supply chain integrity
+- Network segmentation analysis
 
 ## License
 
