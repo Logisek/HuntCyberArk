@@ -246,11 +246,11 @@ param(
     [switch]$IgnoreCertificateErrors,
 
     [Parameter(Mandatory = $false)]
-    [ValidateRange(1, 60)]
+    [ValidateRange(0, 60)]
     [int]$RequestDelay = 0,
 
     [Parameter(Mandatory = $false)]
-    [ValidateRange(1, 100)]
+    [ValidateRange(0, 100)]
     [int]$Jitter = 0,
 
     [Parameter(Mandatory = $false)]
@@ -1258,21 +1258,124 @@ function Add-Finding {
         [ValidateSet("Critical", "High", "Medium", "Low", "Info")]
         [string]$Severity,
         [ValidateSet("Fail", "Pass", "NotApplicable", "Error", "Skipped")]
-        [string]$Status = "Fail"
+        [string]$Status = "Fail",
+        # New comprehensive reporting fields
+        [string]$Evidence = "",
+        [string]$RiskDescription = "",
+        [string[]]$RemediationSteps = @(),
+        [string]$AffectedComponent = "",
+        [string[]]$ComplianceRefs = @(),
+        [string[]]$References = @(),
+        [string]$CVSSScore = "",
+        [string]$TechnicalDetails = "",
+        [string]$BusinessImpact = ""
     )
 
+    # Auto-derive affected component from category if not provided
+    if (-not $AffectedComponent) {
+        $AffectedComponent = switch -Regex ($Category) {
+            "Safe|Access Control" { "Vault" }
+            "Credential|Account" { "CPM" }
+            "PSM|Session" { "PSM" }
+            "PVWA|Web|HTTP" { "PVWA" }
+            "PTA|Threat|Analytics" { "PTA" }
+            "Authentication|User" { "Vault/PVWA" }
+            "Platform" { "CPM/Vault" }
+            "Discovery" { "EPM/Discovery" }
+            "Transport|TLS|Certificate" { "Infrastructure" }
+            "Master Policy" { "Vault" }
+            default { "CyberArk" }
+        }
+    }
+
+    # Auto-generate risk description based on severity if not provided
+    if (-not $RiskDescription) {
+        $RiskDescription = switch ($Severity) {
+            "Critical" { "This finding represents an immediate security risk that could lead to complete compromise of privileged credentials or unauthorized access to critical systems. Immediate remediation is required." }
+            "High" { "This finding represents a significant security weakness that could be exploited to gain unauthorized access to privileged accounts or sensitive data. Remediation should be prioritized." }
+            "Medium" { "This finding represents a security gap that weakens the overall security posture and could be leveraged as part of a larger attack chain. Should be addressed in the near term." }
+            "Low" { "This finding represents a minor security improvement opportunity that, while not immediately critical, contributes to defense-in-depth. Address as part of regular maintenance." }
+            "Info" { "This finding is informational and documents the current configuration for audit trail purposes." }
+            default { "Security finding requiring review." }
+        }
+    }
+
+    # Auto-derive CVSS score estimate if not provided
+    if (-not $CVSSScore) {
+        $CVSSScore = switch ($Severity) {
+            "Critical" { "9.0-10.0 (Critical)" }
+            "High" { "7.0-8.9 (High)" }
+            "Medium" { "4.0-6.9 (Medium)" }
+            "Low" { "0.1-3.9 (Low)" }
+            "Info" { "N/A (Informational)" }
+            default { "N/A" }
+        }
+    }
+
+    # Auto-derive business impact if not provided
+    if (-not $BusinessImpact) {
+        $BusinessImpact = switch ($Severity) {
+            "Critical" { "Potential for complete PAM solution compromise, unauthorized access to all managed credentials, regulatory compliance violations, and significant reputational damage." }
+            "High" { "Potential for unauthorized access to privileged accounts, data breach, compliance audit failures, and operational disruption." }
+            "Medium" { "Reduced security efficacy, potential compliance gaps, increased attack surface that could be exploited in combination with other vulnerabilities." }
+            "Low" { "Minor security hygiene issue that could contribute to a larger attack if combined with other weaknesses." }
+            "Info" { "Informational - no direct business impact but important for documentation." }
+            default { "Requires business impact assessment." }
+        }
+    }
+
+    # Generate evidence string if not provided
+    if (-not $Evidence -and $CurrentValue) {
+        $Evidence = "Detected value: '$CurrentValue' | Expected: '$ExpectedValue' | Resource: '$Resource'"
+    }
+
+    # Convert single recommendation to remediation steps if steps not provided
+    if ($RemediationSteps.Count -eq 0 -and $Recommendation) {
+        $RemediationSteps = @(
+            "1. Review the current configuration: $CurrentValue",
+            "2. $Recommendation",
+            "3. Verify the change by re-running the security audit",
+            "4. Document the remediation in your change management system"
+        )
+    }
+
+    # Add standard compliance references if not provided
+    if ($ComplianceRefs.Count -eq 0) {
+        $ComplianceRefs = @("CIS CyberArk Benchmark", "CyberArk Security Best Practices")
+        if ($CISControl) {
+            $ComplianceRefs += "CIS Control $CISControl"
+        }
+    }
+
     $script:Findings += [PSCustomObject]@{
-        Category       = $Category
-        CISControl     = $CISControl
-        CISDescription = $script:CISControls[$CISControl]
-        Finding        = $Finding
-        Resource       = $Resource
-        CurrentValue   = $CurrentValue
-        ExpectedValue  = $ExpectedValue
-        Recommendation = $Recommendation
-        Severity       = $Severity
-        Status         = $Status
-        Timestamp      = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        # Core finding information
+        FindingID           = "CA-$(Get-Date -Format 'yyyyMMdd')-$([guid]::NewGuid().ToString().Substring(0,8).ToUpper())"
+        Category            = $Category
+        CISControl          = $CISControl
+        CISDescription      = $script:CISControls[$CISControl]
+        Finding             = $Finding
+        Resource            = $Resource
+        CurrentValue        = $CurrentValue
+        ExpectedValue       = $ExpectedValue
+        Recommendation      = $Recommendation
+        Severity            = $Severity
+        Status              = $Status
+        Timestamp           = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        
+        # Enhanced reporting fields
+        AffectedComponent   = $AffectedComponent
+        Evidence            = $Evidence
+        TechnicalDetails    = if ($TechnicalDetails) { $TechnicalDetails } else { "Resource '$Resource' has configuration '$CurrentValue' which does not meet the security requirement of '$ExpectedValue'." }
+        RiskDescription     = $RiskDescription
+        BusinessImpact      = $BusinessImpact
+        CVSSScore           = $CVSSScore
+        RemediationSteps    = $RemediationSteps -join "`n"
+        ComplianceRefs      = $ComplianceRefs -join "; "
+        References          = if ($References.Count -gt 0) { $References -join "; " } else { "https://docs.cyberark.com/; CIS CyberArk Benchmark" }
+        
+        # Audit trail
+        AuditTarget         = $script:PVWA
+        AuditorNotes        = ""
     }
 }
 
@@ -1283,17 +1386,57 @@ function Add-SkippedCheck {
         [string]$CheckName,
         [string]$Reason,
         [ValidateSet("NotApplicable", "Error", "Skipped", "AccessDenied", "Timeout")]
-        [string]$Type = "Skipped"
+        [string]$Type = "Skipped",
+        # Enhanced reporting fields
+        [string]$ManualVerificationSteps = "",
+        [string]$AlternativeEvidence = "",
+        [string]$RiskIfNotChecked = "",
+        [string]$Prerequisites = ""
     )
 
+    # Auto-generate manual verification guidance if not provided
+    if (-not $ManualVerificationSteps) {
+        $ManualVerificationSteps = switch ($Type) {
+            "NotApplicable" { "No manual verification required - this check is not applicable to the current environment configuration." }
+            "Error" { "Investigate the error condition, resolve any connectivity or permission issues, and re-run the audit." }
+            "Skipped" { "This check requires manual verification. Review the CyberArk documentation for CIS Control $CISControl and manually verify compliance." }
+            "AccessDenied" { "Ensure the audit account has sufficient permissions to perform this check. Required permissions should be documented in the Prerequisites." }
+            "Timeout" { "The check timed out. Verify network connectivity and target system availability, then re-run the audit." }
+            default { "Perform manual verification according to CIS Benchmark guidance." }
+        }
+    }
+
+    # Auto-generate risk assessment if not provided
+    if (-not $RiskIfNotChecked) {
+        $RiskIfNotChecked = switch ($Type) {
+            "NotApplicable" { "No risk - check is not applicable to this environment." }
+            "Error" { "Unable to assess security posture for this control. Potential security gap until manually verified." }
+            "Skipped" { "Security posture unknown for this control. Manual assessment required to ensure compliance." }
+            "AccessDenied" { "Security posture unknown due to insufficient permissions. May indicate permission model issues requiring review." }
+            "Timeout" { "Security posture unknown due to timeout. May indicate performance or availability issues." }
+            default { "Unknown security posture - manual verification required." }
+        }
+    }
+
     $script:SkippedChecks += [PSCustomObject]@{
-        Category       = $Category
-        CISControl     = $CISControl
-        CISDescription = $script:CISControls[$CISControl]
-        CheckName      = $CheckName
-        Reason         = $Reason
-        Type           = $Type
-        Timestamp      = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        CheckID                   = "SKIP-$(Get-Date -Format 'yyyyMMdd')-$([guid]::NewGuid().ToString().Substring(0,8).ToUpper())"
+        Category                  = $Category
+        CISControl                = $CISControl
+        CISDescription            = $script:CISControls[$CISControl]
+        CheckName                 = $CheckName
+        Reason                    = $Reason
+        Type                      = $Type
+        Timestamp                 = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        
+        # Enhanced reporting fields
+        ManualVerificationSteps   = $ManualVerificationSteps
+        AlternativeEvidence       = $AlternativeEvidence
+        RiskIfNotChecked          = $RiskIfNotChecked
+        Prerequisites             = if ($Prerequisites) { $Prerequisites } else { "Refer to CyberArk documentation for $CheckName requirements." }
+        
+        # Audit trail
+        AuditTarget               = $script:PVWA
+        FollowUpRequired          = if ($Type -eq "NotApplicable") { $false } else { $true }
     }
 
     Write-AuditLog "Check skipped: $CheckName - $Reason" -Level Warning
@@ -13582,6 +13725,184 @@ function New-HTMLReport {
             .filter-controls { display: none; }
             .section { break-inside: avoid; }
         }
+        /* Additional styles for comprehensive reporting */
+        .exec-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .exec-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2d3436;
+        }
+        .exec-card h4 {
+            margin-bottom: 15px;
+            color: #2d3436;
+        }
+        .exec-card.critical { border-left-color: #d63031; }
+        .exec-card.high { border-left-color: #e17055; }
+        .exec-card.warning { border-left-color: #fdcb6e; }
+        .exec-card.success { border-left-color: #00b894; }
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #dfe6e9;
+        }
+        .timeline-item {
+            position: relative;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -24px;
+            top: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #2d3436;
+        }
+        .timeline-item.critical::before { background: #d63031; }
+        .timeline-item.high::before { background: #e17055; }
+        .timeline-item.medium::before { background: #fdcb6e; }
+        .timeline-item.low::before { background: #74b9ff; }
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .timeline-title {
+            font-weight: 600;
+            color: #2d3436;
+        }
+        .timeline-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            color: white;
+        }
+        .evidence-box {
+            background: #2d3436;
+            color: #00b894;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85em;
+            margin-top: 10px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        .finding-detail-row {
+            display: none;
+        }
+        .finding-detail-row.active {
+            display: table-row;
+        }
+        .finding-detail-cell {
+            background: #f8f9fa;
+            padding: 20px !important;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        .detail-item {
+            background: white;
+            padding: 12px;
+            border-radius: 5px;
+            border: 1px solid #dfe6e9;
+        }
+        .detail-item label {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            color: #636e72;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .component-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            background: #74b9ff;
+            color: white;
+        }
+        .steps-list {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        .steps-list li {
+            margin: 5px 0;
+            color: #2d3436;
+        }
+        .toc {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        .toc h3 {
+            margin-bottom: 15px;
+            color: #2d3436;
+        }
+        .toc-list {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        .toc-list a {
+            color: #0984e3;
+            text-decoration: none;
+            padding: 8px 12px;
+            display: block;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+        .toc-list a:hover {
+            background: #f5f6fa;
+        }
+        .expand-btn {
+            background: none;
+            border: 1px solid #dfe6e9;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.2s;
+        }
+        .expand-btn:hover {
+            background: #f5f6fa;
+        }
+        .compliance-meter {
+            height: 20px;
+            background: #dfe6e9;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .compliance-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00b894, #00cec9);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
     </style>
 </head>
 <body>
@@ -13640,7 +13961,108 @@ function New-HTMLReport {
             </div>
         </div>
 
-        <div class="section">
+        <!-- Table of Contents -->
+        <div class="toc">
+            <h3>Report Sections</h3>
+            <ul class="toc-list">
+                <li><a href="#exec-summary">Executive Summary</a></li>
+                <li><a href="#key-risks">Key Risks & Recommendations</a></li>
+                <li><a href="#cis-compliance">CIS Benchmark Compliance</a></li>
+                <li><a href="#detailed-findings">Detailed Findings</a></li>
+                <li><a href="#remediation-roadmap">Remediation Roadmap</a></li>
+                <li><a href="#component-analysis">Component Analysis</a></li>
+                <li><a href="#skipped-checks">Skipped Checks</a></li>
+            </ul>
+        </div>
+
+        <!-- Executive Summary Section -->
+        <div class="section" id="exec-summary">
+            <div class="section-header">Executive Summary</div>
+            <div class="section-content">
+                <div class="exec-summary-grid">
+                    <div class="exec-card $(if ($criticalCount -gt 0) { 'critical' } elseif ($highCount -gt 0) { 'high' } elseif ($mediumCount -gt 0) { 'warning' } else { 'success' })">
+                        <h4>Overall Security Posture</h4>
+                        <p style="font-size: 2em; font-weight: bold; margin: 10px 0;">$riskRating</p>
+                        <p>Based on comprehensive analysis of $($script:Findings.Count) security checks across the CyberArk PAM infrastructure.</p>
+                        <div class="compliance-meter">
+                            <div class="compliance-fill" style="width: $(if ($script:Findings.Count -gt 0) { [math]::Round(($passCount / $script:Findings.Count) * 100, 0) } else { 0 })%;"></div>
+                        </div>
+                        <p style="font-size: 0.9em; color: #636e72;">$(if ($script:Findings.Count -gt 0) { [math]::Round(($passCount / $script:Findings.Count) * 100, 1) } else { 0 })% of checks passed</p>
+                    </div>
+                    <div class="exec-card">
+                        <h4>Audit Scope</h4>
+                        <ul class="summary-list">
+                            <li><span>Target System</span><strong>$PVWA</strong></li>
+                            <li><span>Safes Analyzed</span><strong>$($script:AuditStats.TotalSafes)</strong></li>
+                            <li><span>Accounts Analyzed</span><strong>$($script:AuditStats.TotalAccounts)</strong></li>
+                            <li><span>Users Analyzed</span><strong>$($script:AuditStats.TotalUsers)</strong></li>
+                            <li><span>Platforms Analyzed</span><strong>$($script:AuditStats.TotalPlatforms)</strong></li>
+                        </ul>
+                    </div>
+                    <div class="exec-card $(if ($criticalCount -gt 0) { 'critical' } else { '' })">
+                        <h4>Immediate Attention Required</h4>
+                        <p style="font-size: 3em; font-weight: bold; color: #d63031; margin: 10px 0;">$criticalCount</p>
+                        <p>Critical findings require immediate remediation within 24-48 hours to prevent potential security compromise.</p>
+                    </div>
+                    <div class="exec-card $(if ($highCount -gt 0) { 'high' } else { '' })">
+                        <h4>Priority Remediation</h4>
+                        <p style="font-size: 3em; font-weight: bold; color: #e17055; margin: 10px 0;">$highCount</p>
+                        <p>High severity findings should be addressed within 1 week to maintain security posture.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Risks Section -->
+        <div class="section" id="key-risks">
+            <div class="section-header" style="background: #d63031;">Key Risks & Immediate Recommendations</div>
+            <div class="section-content">
+"@
+
+    # Add key risks
+    $keyRisks = $script:Findings | Where-Object { $_.Severity -in @("Critical", "High") -and $_.Status -eq "Fail" } | Select-Object -First 10
+    if ($keyRisks.Count -gt 0) {
+        $html += @"
+                <p style="margin-bottom: 20px; color: #636e72;">
+                    The following findings represent the most significant security risks identified during this audit. 
+                    Addressing these issues should be the top priority for the security and PAM teams.
+                </p>
+"@
+        $riskNum = 1
+        foreach ($risk in $keyRisks) {
+            $riskColor = if ($risk.Severity -eq "Critical") { "#d63031" } else { "#e17055" }
+            $html += @"
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid $riskColor;">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <strong style="color: #2d3436;">$riskNum. $($risk.Finding)</strong>
+                            <span class="severity-badge" style="background: $riskColor; margin-left: 10px;">$($risk.Severity)</span>
+                            <span class="component-badge" style="margin-left: 5px;">$($risk.AffectedComponent)</span>
+                        </div>
+                    </div>
+                    <p style="margin: 10px 0; color: #636e72;"><strong>Resource:</strong> <code>$($risk.Resource)</code></p>
+                    <p style="margin: 10px 0;"><strong>Business Impact:</strong> $($risk.BusinessImpact)</p>
+                    <p style="margin: 10px 0;"><strong>Recommendation:</strong> $($risk.Recommendation)</p>
+                    <div class="evidence-box">Evidence: $($risk.Evidence)</div>
+                </div>
+"@
+            $riskNum++
+        }
+    } else {
+        $html += @"
+                <div class="exec-card success">
+                    <h4>No Critical or High Risk Findings</h4>
+                    <p>Congratulations! No critical or high severity issues were identified during this audit. 
+                    Continue to monitor and maintain your security posture by addressing medium and low severity findings.</p>
+                </div>
+"@
+    }
+
+    $html += @"
+            </div>
+        </div>
+
+        <div class="section" id="cis-compliance">
             <div class="section-header">CIS Benchmark Compliance Summary</div>
             <div class="section-content">
                 <table>
@@ -13677,26 +14099,30 @@ function New-HTMLReport {
             </div>
         </div>
 
-        <div class="section">
+        <div class="section" id="detailed-findings">
             <div class="section-header">Detailed Findings</div>
             <div class="section-content">
+                <p style="margin-bottom: 15px; color: #636e72;">
+                    Click on any finding row to expand and view detailed information including evidence, remediation steps, and business impact analysis.
+                </p>
                 <div class="filter-controls">
-                    <button class="filter-btn active" style="background: #2d3436; color: white;" onclick="filterFindings('all')">All</button>
-                    <button class="filter-btn" style="background: #ffebee;" onclick="filterFindings('Critical')">Critical</button>
-                    <button class="filter-btn" style="background: #fff3e0;" onclick="filterFindings('High')">High</button>
-                    <button class="filter-btn" style="background: #fffde7;" onclick="filterFindings('Medium')">Medium</button>
-                    <button class="filter-btn" style="background: #e3f2fd;" onclick="filterFindings('Low')">Low</button>
+                    <button class="filter-btn active" style="background: #2d3436; color: white;" onclick="filterFindings('all')">All ($($script:Findings | Where-Object { $_.Status -eq "Fail" }).Count)</button>
+                    <button class="filter-btn" style="background: #ffebee;" onclick="filterFindings('Critical')">Critical ($criticalCount)</button>
+                    <button class="filter-btn" style="background: #fff3e0;" onclick="filterFindings('High')">High ($highCount)</button>
+                    <button class="filter-btn" style="background: #fffde7;" onclick="filterFindings('Medium')">Medium ($mediumCount)</button>
+                    <button class="filter-btn" style="background: #e3f2fd;" onclick="filterFindings('Low')">Low ($lowCount)</button>
                 </div>
                 <table id="findings-table">
                     <thead>
                         <tr>
+                            <th style="width: 40px;"></th>
+                            <th>ID</th>
                             <th>Severity</th>
-                            <th>CIS Control</th>
+                            <th>Component</th>
                             <th>Category</th>
                             <th>Finding</th>
                             <th>Resource</th>
-                            <th>Current Value</th>
-                            <th>Recommendation</th>
+                            <th>CVSS</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -13705,18 +14131,67 @@ function New-HTMLReport {
     # Add findings sorted by severity
     $severityOrder = @{ "Critical" = 0; "High" = 1; "Medium" = 2; "Low" = 3; "Info" = 4 }
     $sortedFindings = $script:Findings | Where-Object { $_.Status -eq "Fail" } | Sort-Object { $severityOrder[$_.Severity] }
+    $findingIndex = 0
 
     foreach ($finding in $sortedFindings) {
         $severityColor = Get-SeverityColor $finding.Severity
+        $findingIndex++
         $html += @"
-                        <tr class="finding-row" data-severity="$($finding.Severity)">
+                        <tr class="finding-row" data-severity="$($finding.Severity)" onclick="toggleDetail($findingIndex)" style="cursor: pointer;">
+                            <td><button class="expand-btn" id="btn-$findingIndex">+</button></td>
+                            <td><code style="font-size: 0.75em;">$($finding.FindingID)</code></td>
                             <td><span class="severity-badge" style="background: $severityColor;">$($finding.Severity)</span></td>
-                            <td><span class="cis-control">$($finding.CISControl)</span></td>
+                            <td><span class="component-badge">$($finding.AffectedComponent)</span></td>
                             <td class="finding-category">$($finding.Category)</td>
-                            <td>$($finding.Finding)</td>
+                            <td><strong>$($finding.Finding)</strong></td>
                             <td><code>$($finding.Resource)</code></td>
-                            <td>$($finding.CurrentValue)</td>
-                            <td>$($finding.Recommendation)</td>
+                            <td style="font-size: 0.85em;">$($finding.CVSSScore)</td>
+                        </tr>
+                        <tr class="finding-detail-row" id="detail-$findingIndex" data-severity="$($finding.Severity)">
+                            <td colspan="8" class="finding-detail-cell">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <label>CIS Control</label>
+                                        <span class="cis-control">$($finding.CISControl)</span> - $($finding.CISDescription)
+                                    </div>
+                                    <div class="detail-item">
+                                        <label>Current Value</label>
+                                        <code>$($finding.CurrentValue)</code>
+                                    </div>
+                                    <div class="detail-item">
+                                        <label>Expected Value</label>
+                                        <code>$($finding.ExpectedValue)</code>
+                                    </div>
+                                    <div class="detail-item">
+                                        <label>Compliance References</label>
+                                        $($finding.ComplianceRefs)
+                                    </div>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Technical Evidence</label>
+                                    <div class="evidence-box">$($finding.Evidence)
+
+Technical Details: $($finding.TechnicalDetails)</div>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Risk Description</label>
+                                    <p style="margin-top: 5px;">$($finding.RiskDescription)</p>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Business Impact</label>
+                                    <p style="margin-top: 5px; padding: 10px; background: #fff3e0; border-radius: 5px;">$($finding.BusinessImpact)</p>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Remediation Steps</label>
+                                    <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; margin-top: 5px;">
+                                        <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">$($finding.RemediationSteps)</pre>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">References</label>
+                                    <p style="margin-top: 5px; font-size: 0.9em;">$($finding.References)</p>
+                                </div>
+                            </td>
                         </tr>
 "@
     }
@@ -13727,47 +14202,229 @@ function New-HTMLReport {
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-header">Remediation Priority</div>
+        <!-- Remediation Roadmap Section -->
+        <div class="section" id="remediation-roadmap">
+            <div class="section-header" style="background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);">Remediation Roadmap</div>
             <div class="section-content">
-                <h3>Immediate Actions (Critical/High)</h3>
-                <ol style="margin: 20px 0; padding-left: 20px;">
+                <p style="margin-bottom: 20px; color: #636e72;">
+                    The following roadmap provides a prioritized timeline for addressing security findings. 
+                    Each phase is organized by severity to help teams focus on the most critical issues first.
+                </p>
+                <div class="timeline">
 "@
 
-    $priorityFindings = $script:Findings | Where-Object { $_.Severity -in @("Critical", "High") -and $_.Status -eq "Fail" } | Select-Object -Unique Recommendation
-    foreach ($rec in $priorityFindings) {
-        $html += "                    <li style='margin: 10px 0;'>$($rec.Recommendation)</li>`n"
+    # Phase 1: Critical (24-48 hours)
+    $criticalFindings = $script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }
+    if ($criticalFindings.Count -gt 0) {
+        $html += @"
+                    <div class="timeline-item critical">
+                        <div class="timeline-header">
+                            <span class="timeline-title">Phase 1: Immediate Action</span>
+                            <span class="timeline-badge" style="background: #d63031;">24-48 Hours | $($criticalFindings.Count) Items</span>
+                        </div>
+                        <p style="margin-bottom: 15px;">Critical findings that require immediate remediation to prevent potential security compromise.</p>
+                        <ul class="steps-list">
+"@
+        foreach ($finding in $criticalFindings) {
+            $html += "                            <li><strong>$($finding.Resource):</strong> $($finding.Recommendation)</li>`n"
+        }
+        $html += @"
+                        </ul>
+                    </div>
+"@
+    }
+
+    # Phase 2: High (1 week)
+    $highFindings = $script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }
+    if ($highFindings.Count -gt 0) {
+        $html += @"
+                    <div class="timeline-item high">
+                        <div class="timeline-header">
+                            <span class="timeline-title">Phase 2: Urgent Priority</span>
+                            <span class="timeline-badge" style="background: #e17055;">1 Week | $($highFindings.Count) Items</span>
+                        </div>
+                        <p style="margin-bottom: 15px;">High severity findings that pose significant security risk and should be prioritized.</p>
+                        <ul class="steps-list">
+"@
+        $uniqueHighRecs = $highFindings | Select-Object -Property Resource, Recommendation -Unique | Select-Object -First 10
+        foreach ($rec in $uniqueHighRecs) {
+            $html += "                            <li><strong>$($rec.Resource):</strong> $($rec.Recommendation)</li>`n"
+        }
+        if ($highFindings.Count -gt 10) {
+            $html += "                            <li><em>...and $($highFindings.Count - 10) more items</em></li>`n"
+        }
+        $html += @"
+                        </ul>
+                    </div>
+"@
+    }
+
+    # Phase 3: Medium (30 days)
+    $mediumFindings = $script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }
+    if ($mediumFindings.Count -gt 0) {
+        $html += @"
+                    <div class="timeline-item medium">
+                        <div class="timeline-header">
+                            <span class="timeline-title">Phase 3: Standard Priority</span>
+                            <span class="timeline-badge" style="background: #fdcb6e; color: #2d3436;">30 Days | $($mediumFindings.Count) Items</span>
+                        </div>
+                        <p style="margin-bottom: 15px;">Medium severity findings to address in the near term to improve security posture.</p>
+                        <ul class="steps-list">
+"@
+        $uniqueMediumRecs = $mediumFindings | Select-Object -Property Recommendation -Unique | Select-Object -First 5
+        foreach ($rec in $uniqueMediumRecs) {
+            $html += "                            <li>$($rec.Recommendation)</li>`n"
+        }
+        if (($mediumFindings | Select-Object -Property Recommendation -Unique).Count -gt 5) {
+            $html += "                            <li><em>...and more (see detailed findings)</em></li>`n"
+        }
+        $html += @"
+                        </ul>
+                    </div>
+"@
+    }
+
+    # Phase 4: Low (90 days)
+    $lowFindings = $script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }
+    if ($lowFindings.Count -gt 0) {
+        $html += @"
+                    <div class="timeline-item low">
+                        <div class="timeline-header">
+                            <span class="timeline-title">Phase 4: Routine Maintenance</span>
+                            <span class="timeline-badge" style="background: #74b9ff;">90 Days | $($lowFindings.Count) Items</span>
+                        </div>
+                        <p style="margin-bottom: 15px;">Low severity findings to address as part of regular security maintenance.</p>
+                        <ul class="steps-list">
+"@
+        $uniqueLowRecs = $lowFindings | Select-Object -Property Recommendation -Unique | Select-Object -First 5
+        foreach ($rec in $uniqueLowRecs) {
+            $html += "                            <li>$($rec.Recommendation)</li>`n"
+        }
+        if (($lowFindings | Select-Object -Property Recommendation -Unique).Count -gt 5) {
+            $html += "                            <li><em>...and more (see detailed findings)</em></li>`n"
+        }
+        $html += @"
+                        </ul>
+                    </div>
+"@
     }
 
     $html += @"
-                </ol>
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Analysis Section -->
+        <div class="section" id="component-analysis">
+            <div class="section-header">Component Analysis</div>
+            <div class="section-content">
+                <p style="margin-bottom: 20px; color: #636e72;">
+                    Breakdown of findings by CyberArk component to help assign remediation tasks to the appropriate teams.
+                </p>
+                <div class="exec-summary-grid">
+"@
+
+    # Generate component analysis cards
+    $componentGroups = $script:Findings | Where-Object { $_.Status -eq "Fail" } | Group-Object AffectedComponent
+    foreach ($component in $componentGroups) {
+        $compCritical = ($component.Group | Where-Object { $_.Severity -eq "Critical" }).Count
+        $compHigh = ($component.Group | Where-Object { $_.Severity -eq "High" }).Count
+        $compMedium = ($component.Group | Where-Object { $_.Severity -eq "Medium" }).Count
+        $compLow = ($component.Group | Where-Object { $_.Severity -eq "Low" }).Count
+        $cardClass = if ($compCritical -gt 0) { "critical" } elseif ($compHigh -gt 0) { "high" } elseif ($compMedium -gt 0) { "warning" } else { "" }
+        
+        $html += @"
+                    <div class="exec-card $cardClass">
+                        <h4><span class="component-badge" style="background: #2d3436;">$($component.Name)</span></h4>
+                        <p style="font-size: 2.5em; font-weight: bold; margin: 15px 0;">$($component.Count)</p>
+                        <p style="color: #636e72; margin-bottom: 10px;">Total Findings</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+                            $(if ($compCritical -gt 0) { "<span style='padding: 3px 8px; background: #d63031; color: white; border-radius: 4px; font-size: 0.8em;'>$compCritical Critical</span>" })
+                            $(if ($compHigh -gt 0) { "<span style='padding: 3px 8px; background: #e17055; color: white; border-radius: 4px; font-size: 0.8em;'>$compHigh High</span>" })
+                            $(if ($compMedium -gt 0) { "<span style='padding: 3px 8px; background: #fdcb6e; color: #2d3436; border-radius: 4px; font-size: 0.8em;'>$compMedium Medium</span>" })
+                            $(if ($compLow -gt 0) { "<span style='padding: 3px 8px; background: #74b9ff; color: white; border-radius: 4px; font-size: 0.8em;'>$compLow Low</span>" })
+                        </div>
+                        <div style="margin-top: 15px; text-align: left;">
+                            <p style="font-size: 0.85em; color: #636e72;"><strong>Top Categories:</strong></p>
+                            <ul style="font-size: 0.85em; margin-top: 5px; padding-left: 15px;">
+"@
+        $topCategories = $component.Group | Group-Object Category | Sort-Object Count -Descending | Select-Object -First 3
+        foreach ($cat in $topCategories) {
+            $html += "                                <li>$($cat.Name) ($($cat.Count))</li>`n"
+        }
+        $html += @"
+                            </ul>
+                        </div>
+                    </div>
+"@
+    }
+
+    $html += @"
+                </div>
             </div>
         </div>
 "@
 
     # Add Skipped/Not Applicable Checks section if there are any
     if ($script:SkippedChecks.Count -gt 0) {
+        # Calculate skipped check summary
+        $skippedByType = @{
+            NotApplicable = ($script:SkippedChecks | Where-Object { $_.Type -eq "NotApplicable" }).Count
+            Skipped = ($script:SkippedChecks | Where-Object { $_.Type -eq "Skipped" }).Count
+            Error = ($script:SkippedChecks | Where-Object { $_.Type -eq "Error" }).Count
+            AccessDenied = ($script:SkippedChecks | Where-Object { $_.Type -eq "AccessDenied" }).Count
+            Timeout = ($script:SkippedChecks | Where-Object { $_.Type -eq "Timeout" }).Count
+        }
+        $requiresFollowUp = ($script:SkippedChecks | Where-Object { $_.FollowUpRequired -eq $true }).Count
+
         $html += @"
-        <div class="section">
+        <div class="section" id="skipped-checks">
             <div class="section-header" style="background: #636e72;">Checks Not Performed / Not Applicable</div>
             <div class="section-content">
                 <p style="margin-bottom: 20px; color: #636e72;">
                     The following checks could not be performed or were not applicable to this environment.
-                    Review these items to ensure complete security coverage.
+                    <strong style="color: #e17055;">$requiresFollowUp checks require manual follow-up</strong> to ensure complete security coverage.
                 </p>
+                
+                <!-- Skipped Checks Summary -->
+                <div class="exec-summary-grid" style="margin-bottom: 25px;">
+                    <div class="exec-card" style="border-left-color: #95a5a6;">
+                        <h4>Not Applicable</h4>
+                        <p style="font-size: 2em; font-weight: bold;">$($skippedByType.NotApplicable)</p>
+                        <p style="font-size: 0.85em; color: #636e72;">Checks not relevant to this environment</p>
+                    </div>
+                    <div class="exec-card" style="border-left-color: #f39c12;">
+                        <h4>Skipped</h4>
+                        <p style="font-size: 2em; font-weight: bold;">$($skippedByType.Skipped)</p>
+                        <p style="font-size: 0.85em; color: #636e72;">Checks requiring manual verification</p>
+                    </div>
+                    <div class="exec-card" style="border-left-color: #e74c3c;">
+                        <h4>Errors</h4>
+                        <p style="font-size: 2em; font-weight: bold;">$($skippedByType.Error)</p>
+                        <p style="font-size: 0.85em; color: #636e72;">Checks that encountered errors</p>
+                    </div>
+                    <div class="exec-card" style="border-left-color: #9b59b6;">
+                        <h4>Access Denied</h4>
+                        <p style="font-size: 2em; font-weight: bold;">$($skippedByType.AccessDenied)</p>
+                        <p style="font-size: 0.85em; color: #636e72;">Insufficient permissions</p>
+                    </div>
+                </div>
+
                 <table>
                     <thead>
                         <tr>
+                            <th style="width: 40px;"></th>
                             <th>Status</th>
                             <th>Control</th>
                             <th>Category</th>
                             <th>Check Name</th>
                             <th>Reason</th>
+                            <th>Follow-Up</th>
                         </tr>
                     </thead>
                     <tbody>
 "@
-
+        $skipIndex = 0
         foreach ($skipped in $script:SkippedChecks) {
             $statusColor = switch ($skipped.Type) {
                 "NotApplicable" { "#95a5a6" }
@@ -13785,14 +14442,47 @@ function New-HTMLReport {
                 "Timeout" { "TIME" }
                 default { "?" }
             }
+            $skipIndex++
+            $followUpIcon = if ($skipped.FollowUpRequired) { "<span style='color: #e17055;'>&#9888; Yes</span>" } else { "<span style='color: #00b894;'>&#10004; No</span>" }
 
             $html += @"
-                        <tr>
+                        <tr onclick="toggleSkipDetail($skipIndex)" style="cursor: pointer;">
+                            <td><button class="expand-btn" id="skip-btn-$skipIndex">+</button></td>
                             <td><span class="severity-badge" style="background: $statusColor;">$statusIcon</span></td>
                             <td><span class="cis-control">$($skipped.CISControl)</span></td>
                             <td>$($skipped.Category)</td>
                             <td><strong>$($skipped.CheckName)</strong></td>
                             <td>$($skipped.Reason)</td>
+                            <td>$followUpIcon</td>
+                        </tr>
+                        <tr class="finding-detail-row" id="skip-detail-$skipIndex" style="display: none;">
+                            <td colspan="7" class="finding-detail-cell">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <label>Check ID</label>
+                                        <code>$($skipped.CheckID)</code>
+                                    </div>
+                                    <div class="detail-item">
+                                        <label>CIS Control Description</label>
+                                        $($skipped.CISDescription)
+                                    </div>
+                                    <div class="detail-item">
+                                        <label>Prerequisites</label>
+                                        $($skipped.Prerequisites)
+                                    </div>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Risk If Not Checked</label>
+                                    <p style="margin-top: 5px; padding: 10px; background: #fff3e0; border-radius: 5px;">$($skipped.RiskIfNotChecked)</p>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Manual Verification Steps</label>
+                                    <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; margin-top: 5px;">
+                                        <pre style="white-space: pre-wrap; margin: 0; font-family: inherit;">$($skipped.ManualVerificationSteps)</pre>
+                                    </div>
+                                </div>
+                                $(if ($skipped.AlternativeEvidence) { "<div style='margin-top: 15px;'><label style='font-size: 0.75em; text-transform: uppercase; color: #636e72;'>Alternative Evidence</label><p style='margin-top: 5px;'>$($skipped.AlternativeEvidence)</p></div>" })
+                            </td>
                         </tr>
 "@
         }
@@ -13811,6 +14501,7 @@ function New-HTMLReport {
     <script>
         function filterFindings(severity) {
             const rows = document.querySelectorAll('.finding-row');
+            const detailRows = document.querySelectorAll('.finding-detail-row');
             const buttons = document.querySelectorAll('.filter-btn');
 
             buttons.forEach(btn => {
@@ -13827,7 +14518,82 @@ function New-HTMLReport {
                     row.style.display = 'none';
                 }
             });
+
+            // Also filter detail rows
+            detailRows.forEach(row => {
+                if (severity === 'all' || row.dataset.severity === severity) {
+                    // Keep detail rows hidden unless expanded
+                    if (!row.classList.contains('active')) {
+                        row.style.display = 'none';
+                    }
+                } else {
+                    row.style.display = 'none';
+                    row.classList.remove('active');
+                }
+            });
         }
+
+        function toggleDetail(index) {
+            const detailRow = document.getElementById('detail-' + index);
+            const btn = document.getElementById('btn-' + index);
+            
+            if (detailRow.classList.contains('active')) {
+                detailRow.classList.remove('active');
+                detailRow.style.display = 'none';
+                btn.textContent = '+';
+            } else {
+                detailRow.classList.add('active');
+                detailRow.style.display = 'table-row';
+                btn.textContent = '-';
+            }
+        }
+
+        function toggleSkipDetail(index) {
+            const detailRow = document.getElementById('skip-detail-' + index);
+            const btn = document.getElementById('skip-btn-' + index);
+            
+            if (detailRow.style.display === 'table-row') {
+                detailRow.style.display = 'none';
+                btn.textContent = '+';
+            } else {
+                detailRow.style.display = 'table-row';
+                btn.textContent = '-';
+            }
+        }
+
+        function expandAll() {
+            document.querySelectorAll('.finding-detail-row').forEach((row, index) => {
+                row.classList.add('active');
+                row.style.display = 'table-row';
+                const btn = document.getElementById('btn-' + (index + 1));
+                if (btn) btn.textContent = '-';
+            });
+        }
+
+        function collapseAll() {
+            document.querySelectorAll('.finding-detail-row').forEach((row, index) => {
+                row.classList.remove('active');
+                row.style.display = 'none';
+                const btn = document.getElementById('btn-' + (index + 1));
+                if (btn) btn.textContent = '+';
+            });
+        }
+
+        // Print-friendly: expand all before printing
+        window.onbeforeprint = function() {
+            expandAll();
+        };
+
+        // Smooth scroll for table of contents
+        document.querySelectorAll('.toc-list a').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
     </script>
 </body>
 </html>
@@ -13840,44 +14606,497 @@ function New-HTMLReport {
 }
 
 function Export-CSVReport {
-    Write-AuditLog "Exporting CSV report..." -Level Info
+    Write-AuditLog "Exporting comprehensive CSV reports..." -Level Info
 
-    $csvPath = Join-Path $OutputPath "CyberArk_Security_Audit_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-    $script:Findings | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $baseFileName = "CyberArk_Security_Audit_$timestamp"
+    $exportedFiles = @()
 
-    Write-AuditLog "CSV report saved to: $csvPath" -Level Success
-    return $csvPath
+    # 1. Executive Summary CSV - High-level overview for leadership
+    $execSummaryPath = Join-Path $OutputPath "${baseFileName}_Executive_Summary.csv"
+    $execSummary = @(
+        [PSCustomObject]@{
+            ReportSection = "Audit Overview"
+            Metric = "Target System"
+            Value = $PVWA
+            Details = "CyberArk PVWA endpoint audited"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Audit Overview"
+            Metric = "Audit Date"
+            Value = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Details = "Timestamp of audit execution"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Audit Overview"
+            Metric = "Total Findings"
+            Value = $script:Findings.Count
+            Details = "Total security checks performed"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "Critical Findings"
+            Value = ($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }).Count
+            Details = "Immediate action required - potential for complete compromise"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "High Findings"
+            Value = ($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }).Count
+            Details = "Priority remediation needed - significant security risk"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "Medium Findings"
+            Value = ($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }).Count
+            Details = "Near-term remediation recommended"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "Low Findings"
+            Value = ($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }).Count
+            Details = "Address during regular maintenance"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "Passed Checks"
+            Value = ($script:Findings | Where-Object { $_.Status -eq "Pass" }).Count
+            Details = "Security controls verified as compliant"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Summary"
+            Metric = "Skipped Checks"
+            Value = $script:SkippedChecks.Count
+            Details = "Checks requiring manual verification"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Risk Score"
+            Metric = "Calculated Risk Score"
+            Value = (($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }).Count * 40) + 
+                    (($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }).Count * 20) + 
+                    (($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }).Count * 5) + 
+                    (($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }).Count * 1)
+            Details = "Weighted score: Critical=40, High=20, Medium=5, Low=1"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Environment"
+            Metric = "Total Safes Audited"
+            Value = $script:AuditStats.TotalSafes
+            Details = "Number of safes analyzed"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Environment"
+            Metric = "Total Accounts Audited"
+            Value = $script:AuditStats.TotalAccounts
+            Details = "Number of privileged accounts analyzed"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Environment"
+            Metric = "Total Users Audited"
+            Value = $script:AuditStats.TotalUsers
+            Details = "Number of CyberArk users analyzed"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Environment"
+            Metric = "Unmanaged Accounts"
+            Value = $script:AuditStats.UnmanagedAccounts
+            Details = "Accounts not under automatic password management"
+        },
+        [PSCustomObject]@{
+            ReportSection = "Environment"
+            Metric = "Pending Discovery Accounts"
+            Value = $script:AuditStats.PendingAccounts
+            Details = "Discovered accounts awaiting review"
+        }
+    )
+    $execSummary | Export-Csv -Path $execSummaryPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $execSummaryPath
+
+    # 2. Full Findings Report - All findings with complete details
+    $findingsPath = Join-Path $OutputPath "${baseFileName}_Full_Findings.csv"
+    $script:Findings | Select-Object FindingID, Timestamp, Severity, Status, Category, AffectedComponent, 
+        CISControl, CISDescription, Finding, Resource, CurrentValue, ExpectedValue, 
+        Evidence, TechnicalDetails, RiskDescription, BusinessImpact, CVSSScore,
+        Recommendation, RemediationSteps, ComplianceRefs, References, AuditTarget, AuditorNotes |
+        Export-Csv -Path $findingsPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $findingsPath
+
+    # 3. Failed Findings Only - For remediation tracking
+    $failedPath = Join-Path $OutputPath "${baseFileName}_Failed_Findings.csv"
+    $script:Findings | Where-Object { $_.Status -eq "Fail" } | 
+        Sort-Object @{Expression={
+            switch ($_.Severity) {
+                "Critical" { 0 }
+                "High" { 1 }
+                "Medium" { 2 }
+                "Low" { 3 }
+                "Info" { 4 }
+                default { 5 }
+            }
+        }} |
+        Select-Object FindingID, Severity, Category, AffectedComponent, Finding, Resource, 
+            CurrentValue, ExpectedValue, Recommendation, RemediationSteps, BusinessImpact, CVSSScore |
+        Export-Csv -Path $failedPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $failedPath
+
+    # 4. Remediation Tracker - Actionable items for IT teams
+    $remediationPath = Join-Path $OutputPath "${baseFileName}_Remediation_Tracker.csv"
+    $remediationItems = $script:Findings | Where-Object { $_.Status -eq "Fail" } | ForEach-Object {
+        [PSCustomObject]@{
+            FindingID = $_.FindingID
+            Priority = switch ($_.Severity) {
+                "Critical" { "P1 - Immediate (24-48 hours)" }
+                "High" { "P2 - Urgent (1 week)" }
+                "Medium" { "P3 - Standard (30 days)" }
+                "Low" { "P4 - Routine (90 days)" }
+                default { "P5 - As Resources Permit" }
+            }
+            Severity = $_.Severity
+            Category = $_.Category
+            AffectedComponent = $_.AffectedComponent
+            Finding = $_.Finding
+            Resource = $_.Resource
+            RemediationSteps = $_.RemediationSteps
+            AssignedTo = ""
+            Status = "Open"
+            DueDate = ""
+            CompletionDate = ""
+            VerificationNotes = ""
+            RiskAccepted = "No"
+            RiskAcceptanceJustification = ""
+        }
+    }
+    $remediationItems | Export-Csv -Path $remediationPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $remediationPath
+
+    # 5. Skipped Checks Report - For manual follow-up
+    $skippedPath = Join-Path $OutputPath "${baseFileName}_Skipped_Checks.csv"
+    $script:SkippedChecks | Select-Object CheckID, Timestamp, Type, Category, CISControl, CISDescription,
+        CheckName, Reason, ManualVerificationSteps, RiskIfNotChecked, Prerequisites, 
+        AlternativeEvidence, FollowUpRequired, AuditTarget |
+        Export-Csv -Path $skippedPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $skippedPath
+
+    # 6. CIS Control Compliance Matrix
+    $cisMatrixPath = Join-Path $OutputPath "${baseFileName}_CIS_Compliance_Matrix.csv"
+    $cisMatrix = foreach ($controlId in ($script:CISControls.Keys | Sort-Object)) {
+        $controlFindings = $script:Findings | Where-Object { $_.CISControl -eq $controlId }
+        $failedFindings = $controlFindings | Where-Object { $_.Status -eq "Fail" }
+        $passedFindings = $controlFindings | Where-Object { $_.Status -eq "Pass" }
+        
+        [PSCustomObject]@{
+            CISControlID = $controlId
+            ControlDescription = $script:CISControls[$controlId]
+            TotalChecks = $controlFindings.Count
+            PassedChecks = $passedFindings.Count
+            FailedChecks = $failedFindings.Count
+            CompliancePercentage = if ($controlFindings.Count -gt 0) { 
+                [math]::Round(($passedFindings.Count / $controlFindings.Count) * 100, 1) 
+            } else { "N/A" }
+            Status = if ($failedFindings.Count -eq 0) { "Compliant" } 
+                     elseif ($failedFindings | Where-Object { $_.Severity -eq "Critical" }) { "Critical Non-Compliance" }
+                     elseif ($failedFindings | Where-Object { $_.Severity -eq "High" }) { "High Non-Compliance" }
+                     else { "Partial Compliance" }
+            CriticalIssues = ($failedFindings | Where-Object { $_.Severity -eq "Critical" }).Count
+            HighIssues = ($failedFindings | Where-Object { $_.Severity -eq "High" }).Count
+            MediumIssues = ($failedFindings | Where-Object { $_.Severity -eq "Medium" }).Count
+            LowIssues = ($failedFindings | Where-Object { $_.Severity -eq "Low" }).Count
+            RemediationRequired = if ($failedFindings.Count -gt 0) { "Yes" } else { "No" }
+        }
+    }
+    $cisMatrix | Export-Csv -Path $cisMatrixPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $cisMatrixPath
+
+    # 7. Component-Based Summary - For component owners
+    $componentPath = Join-Path $OutputPath "${baseFileName}_Component_Summary.csv"
+    $componentSummary = $script:Findings | Where-Object { $_.Status -eq "Fail" } | 
+        Group-Object AffectedComponent | ForEach-Object {
+        $componentFindings = $_.Group
+        [PSCustomObject]@{
+            Component = $_.Name
+            TotalFindings = $_.Count
+            CriticalCount = ($componentFindings | Where-Object { $_.Severity -eq "Critical" }).Count
+            HighCount = ($componentFindings | Where-Object { $_.Severity -eq "High" }).Count
+            MediumCount = ($componentFindings | Where-Object { $_.Severity -eq "Medium" }).Count
+            LowCount = ($componentFindings | Where-Object { $_.Severity -eq "Low" }).Count
+            TopCategories = ($componentFindings | Group-Object Category | Sort-Object Count -Descending | Select-Object -First 3 | ForEach-Object { "$($_.Name) ($($_.Count))" }) -join "; "
+            ImmediateActions = ($componentFindings | Where-Object { $_.Severity -in @("Critical", "High") } | Select-Object -ExpandProperty Recommendation -Unique) -join "; "
+        }
+    }
+    $componentSummary | Export-Csv -Path $componentPath -NoTypeInformation -Encoding UTF8
+    $exportedFiles += $componentPath
+
+    foreach ($file in $exportedFiles) {
+        Write-AuditLog "CSV report saved: $file" -Level Success
+    }
+
+    return $exportedFiles
 }
 
 function Export-JSONReport {
-    Write-AuditLog "Exporting JSON report..." -Level Info
+    Write-AuditLog "Exporting comprehensive JSON report..." -Level Info
 
     $jsonPath = Join-Path $OutputPath "CyberArk_Security_Audit_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
 
-    $report = @{
-        metadata = @{
-            target = $PVWA
-            auditDate = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
-            totalFindings = $script:Findings.Count
-            totalSkipped = $script:SkippedChecks.Count
-            statistics = $script:AuditStats
+    # Calculate comprehensive statistics
+    $criticalCount = ($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }).Count
+    $highCount = ($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }).Count
+    $mediumCount = ($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }).Count
+    $lowCount = ($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }).Count
+    $passCount = ($script:Findings | Where-Object { $_.Status -eq "Pass" }).Count
+    $totalFailed = $criticalCount + $highCount + $mediumCount + $lowCount
+
+    $riskScore = ($criticalCount * 40) + ($highCount * 20) + ($mediumCount * 5) + ($lowCount * 1)
+    $riskRating = if ($riskScore -eq 0) { "Excellent" }
+                  elseif ($riskScore -lt 20) { "Good" }
+                  elseif ($riskScore -lt 50) { "Fair" }
+                  elseif ($riskScore -lt 100) { "Poor" }
+                  else { "Critical" }
+
+    # Build CIS control compliance matrix
+    $cisComplianceMatrix = @{}
+    foreach ($controlId in ($script:CISControls.Keys | Sort-Object)) {
+        $controlFindings = $script:Findings | Where-Object { $_.CISControl -eq $controlId }
+        $failedFindings = $controlFindings | Where-Object { $_.Status -eq "Fail" }
+        $passedFindings = $controlFindings | Where-Object { $_.Status -eq "Pass" }
+        
+        $cisComplianceMatrix[$controlId] = @{
+            description = $script:CISControls[$controlId]
+            totalChecks = $controlFindings.Count
+            passed = $passedFindings.Count
+            failed = $failedFindings.Count
+            compliancePercentage = if ($controlFindings.Count -gt 0) { 
+                [math]::Round(($passedFindings.Count / $controlFindings.Count) * 100, 1) 
+            } else { 0 }
+            criticalIssues = ($failedFindings | Where-Object { $_.Severity -eq "Critical" }).Count
+            highIssues = ($failedFindings | Where-Object { $_.Severity -eq "High" }).Count
+            mediumIssues = ($failedFindings | Where-Object { $_.Severity -eq "Medium" }).Count
+            lowIssues = ($failedFindings | Where-Object { $_.Severity -eq "Low" }).Count
+            status = if ($failedFindings.Count -eq 0) { "Compliant" } 
+                     elseif ($failedFindings | Where-Object { $_.Severity -eq "Critical" }) { "Critical" }
+                     elseif ($failedFindings | Where-Object { $_.Severity -eq "High" }) { "High Risk" }
+                     else { "Partial" }
         }
-        summary = @{
-            critical = ($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }).Count
-            high = ($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }).Count
-            medium = ($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }).Count
-            low = ($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }).Count
-            passed = ($script:Findings | Where-Object { $_.Status -eq "Pass" }).Count
-            skipped = ($script:SkippedChecks | Where-Object { $_.Type -eq "Skipped" }).Count
-            notApplicable = ($script:SkippedChecks | Where-Object { $_.Type -eq "NotApplicable" }).Count
-            errors = ($script:SkippedChecks | Where-Object { $_.Type -eq "Error" }).Count
-        }
-        findings = $script:Findings
-        skippedChecks = $script:SkippedChecks
-        cisControls = $script:CISControls
     }
 
-    $report | ConvertTo-Json -Depth 10 | Out-File -FilePath $jsonPath -Encoding UTF8
+    # Build component-level analysis
+    $componentAnalysis = @{}
+    $script:Findings | Where-Object { $_.Status -eq "Fail" } | Group-Object AffectedComponent | ForEach-Object {
+        $componentFindings = $_.Group
+        $componentAnalysis[$_.Name] = @{
+            totalFindings = $_.Count
+            critical = ($componentFindings | Where-Object { $_.Severity -eq "Critical" }).Count
+            high = ($componentFindings | Where-Object { $_.Severity -eq "High" }).Count
+            medium = ($componentFindings | Where-Object { $_.Severity -eq "Medium" }).Count
+            low = ($componentFindings | Where-Object { $_.Severity -eq "Low" }).Count
+            categories = ($componentFindings | Group-Object Category | ForEach-Object { 
+                @{ name = $_.Name; count = $_.Count } 
+            })
+            topRecommendations = ($componentFindings | Where-Object { $_.Severity -in @("Critical", "High") } | 
+                Select-Object -ExpandProperty Recommendation -Unique | Select-Object -First 5)
+        }
+    }
+
+    # Build category-level analysis
+    $categoryAnalysis = @{}
+    $script:Findings | Where-Object { $_.Status -eq "Fail" } | Group-Object Category | ForEach-Object {
+        $catFindings = $_.Group
+        $categoryAnalysis[$_.Name] = @{
+            totalFindings = $_.Count
+            critical = ($catFindings | Where-Object { $_.Severity -eq "Critical" }).Count
+            high = ($catFindings | Where-Object { $_.Severity -eq "High" }).Count
+            medium = ($catFindings | Where-Object { $_.Severity -eq "Medium" }).Count
+            low = ($catFindings | Where-Object { $_.Severity -eq "Low" }).Count
+            affectedResources = ($catFindings | Select-Object -ExpandProperty Resource -Unique)
+            recommendations = ($catFindings | Select-Object -ExpandProperty Recommendation -Unique)
+        }
+    }
+
+    # Build prioritized remediation roadmap
+    $remediationRoadmap = @{
+        immediate = @{
+            timeframe = "24-48 hours"
+            description = "Critical findings requiring immediate attention to prevent potential compromise"
+            findings = @($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" } | ForEach-Object {
+                @{
+                    findingId = $_.FindingID
+                    finding = $_.Finding
+                    resource = $_.Resource
+                    recommendation = $_.Recommendation
+                    remediationSteps = $_.RemediationSteps
+                    businessImpact = $_.BusinessImpact
+                }
+            })
+        }
+        urgent = @{
+            timeframe = "1 week"
+            description = "High severity findings that pose significant security risk"
+            findings = @($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" } | ForEach-Object {
+                @{
+                    findingId = $_.FindingID
+                    finding = $_.Finding
+                    resource = $_.Resource
+                    recommendation = $_.Recommendation
+                    remediationSteps = $_.RemediationSteps
+                }
+            })
+        }
+        standard = @{
+            timeframe = "30 days"
+            description = "Medium severity findings to address in the near term"
+            findings = @($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" } | ForEach-Object {
+                @{
+                    findingId = $_.FindingID
+                    finding = $_.Finding
+                    resource = $_.Resource
+                    recommendation = $_.Recommendation
+                }
+            })
+        }
+        routine = @{
+            timeframe = "90 days"
+            description = "Low severity findings to address as part of regular maintenance"
+            findings = @($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" } | ForEach-Object {
+                @{
+                    findingId = $_.FindingID
+                    finding = $_.Finding
+                    resource = $_.Resource
+                    recommendation = $_.Recommendation
+                }
+            })
+        }
+    }
+
+    # Build comprehensive report structure
+    $report = @{
+        reportInfo = @{
+            title = "CyberArk Privileged Access Security Audit Report"
+            generatedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+            generatedBy = "CyberArk Security Audit Tool v4.2"
+            reportVersion = "2.0"
+            exportFormat = "JSON"
+        }
+        auditMetadata = @{
+            target = $PVWA
+            auditDate = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+            auditDuration = if ($script:AuditStats.Duration) { $script:AuditStats.Duration } else { "N/A" }
+            auditorInfo = @{
+                hostname = $env:COMPUTERNAME
+                username = $env:USERNAME
+                domain = $env:USERDOMAIN
+            }
+        }
+        executiveSummary = @{
+            overallRiskRating = $riskRating
+            riskScore = $riskScore
+            riskScoreExplanation = "Weighted calculation: Critical(x40) + High(x20) + Medium(x5) + Low(x1)"
+            keyMetrics = @{
+                totalChecksPerformed = $script:Findings.Count
+                totalFailedChecks = $totalFailed
+                totalPassedChecks = $passCount
+                totalSkippedChecks = $script:SkippedChecks.Count
+                compliancePercentage = if ($script:Findings.Count -gt 0) { 
+                    [math]::Round(($passCount / $script:Findings.Count) * 100, 1) 
+                } else { 0 }
+            }
+            findingsBySeverity = @{
+                critical = @{ count = $criticalCount; description = "Immediate remediation required" }
+                high = @{ count = $highCount; description = "Priority remediation within 1 week" }
+                medium = @{ count = $mediumCount; description = "Address within 30 days" }
+                low = @{ count = $lowCount; description = "Address within 90 days" }
+            }
+            keyRisks = @($script:Findings | Where-Object { $_.Severity -in @("Critical", "High") -and $_.Status -eq "Fail" } | 
+                Select-Object -First 10 | ForEach-Object {
+                    @{
+                        finding = $_.Finding
+                        severity = $_.Severity
+                        businessImpact = $_.BusinessImpact
+                        recommendation = $_.Recommendation
+                    }
+                })
+            immediatePriorities = @($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" } | 
+                Select-Object -ExpandProperty Recommendation -Unique | Select-Object -First 5)
+        }
+        environmentOverview = @{
+            statistics = $script:AuditStats
+            summary = @{
+                totalSafes = $script:AuditStats.TotalSafes
+                totalAccounts = $script:AuditStats.TotalAccounts
+                totalUsers = $script:AuditStats.TotalUsers
+                unmanagedAccounts = $script:AuditStats.UnmanagedAccounts
+                pendingDiscoveryAccounts = $script:AuditStats.PendingAccounts
+            }
+        }
+        complianceAnalysis = @{
+            overallCompliance = if ($script:Findings.Count -gt 0) { 
+                [math]::Round(($passCount / $script:Findings.Count) * 100, 1) 
+            } else { 0 }
+            cisControlsCompliance = $cisComplianceMatrix
+            complianceByFramework = @{
+                "CIS CyberArk Benchmark" = @{
+                    totalControls = $script:CISControls.Count
+                    compliantControls = ($cisComplianceMatrix.Values | Where-Object { $_.status -eq "Compliant" }).Count
+                    nonCompliantControls = ($cisComplianceMatrix.Values | Where-Object { $_.status -ne "Compliant" }).Count
+                }
+            }
+        }
+        componentAnalysis = $componentAnalysis
+        categoryAnalysis = $categoryAnalysis
+        remediationRoadmap = $remediationRoadmap
+        detailedFindings = @{
+            failed = @($script:Findings | Where-Object { $_.Status -eq "Fail" } | Sort-Object @{
+                Expression = { 
+                    switch ($_.Severity) { "Critical" { 0 } "High" { 1 } "Medium" { 2 } "Low" { 3 } default { 4 } }
+                }
+            })
+            passed = @($script:Findings | Where-Object { $_.Status -eq "Pass" })
+            all = $script:Findings
+        }
+        skippedChecks = @{
+            summary = @{
+                total = $script:SkippedChecks.Count
+                notApplicable = ($script:SkippedChecks | Where-Object { $_.Type -eq "NotApplicable" }).Count
+                errors = ($script:SkippedChecks | Where-Object { $_.Type -eq "Error" }).Count
+                accessDenied = ($script:SkippedChecks | Where-Object { $_.Type -eq "AccessDenied" }).Count
+                timeout = ($script:SkippedChecks | Where-Object { $_.Type -eq "Timeout" }).Count
+                skipped = ($script:SkippedChecks | Where-Object { $_.Type -eq "Skipped" }).Count
+            }
+            requiresFollowUp = @($script:SkippedChecks | Where-Object { $_.FollowUpRequired -eq $true })
+            notApplicable = @($script:SkippedChecks | Where-Object { $_.Type -eq "NotApplicable" })
+            all = $script:SkippedChecks
+        }
+        cisControlsReference = $script:CISControls
+        appendix = @{
+            glossary = @{
+                "PVWA" = "Password Vault Web Access - Web interface for CyberArk"
+                "CPM" = "Central Policy Manager - Manages password rotation"
+                "PSM" = "Privileged Session Manager - Session recording and isolation"
+                "PTA" = "Privileged Threat Analytics - Behavioral analysis"
+                "EPM" = "Endpoint Privilege Manager"
+                "Safe" = "Secure container for privileged credentials"
+                "Platform" = "Template defining password management policies"
+            }
+            severityDefinitions = @{
+                "Critical" = "Immediate risk of compromise. Exploitation could lead to complete system takeover or data breach. Remediate within 24-48 hours."
+                "High" = "Significant security weakness. Could be exploited to gain unauthorized access. Remediate within 1 week."
+                "Medium" = "Security gap that weakens overall posture. Address within 30 days."
+                "Low" = "Minor improvement opportunity. Address within 90 days or as part of regular maintenance."
+                "Info" = "Informational finding for documentation purposes."
+            }
+            riskScoreExplanation = @{
+                formula = "(Critical * 40) + (High * 20) + (Medium * 5) + (Low * 1)"
+                ratings = @{
+                    "0" = "Excellent - No security issues detected"
+                    "1-19" = "Good - Minor issues only"
+                    "20-49" = "Fair - Some issues require attention"
+                    "50-99" = "Poor - Significant issues require remediation"
+                    "100+" = "Critical - Immediate action required"
+                }
+            }
+        }
+    }
+
+    $report | ConvertTo-Json -Depth 15 | Out-File -FilePath $jsonPath -Encoding UTF8
 
     Write-AuditLog "JSON report saved to: $jsonPath" -Level Success
     return $jsonPath
@@ -14610,10 +15829,27 @@ function Start-Audit {
     }
     Write-Host "Reports Generated:" -ForegroundColor Cyan
     if ($htmlReport) { Write-Host "  HTML: $htmlReport" -ForegroundColor White } else { Write-Host "  HTML: FAILED" -ForegroundColor Red }
-    if ($csvReport) { Write-Host "  CSV:  $csvReport" -ForegroundColor White } else { Write-Host "  CSV:  FAILED" -ForegroundColor Red }
+    if ($csvReport -and $csvReport.Count -gt 0) { 
+        Write-Host "  CSV Reports ($($csvReport.Count) files):" -ForegroundColor White
+        foreach ($csvFile in $csvReport) {
+            Write-Host "    - $(Split-Path $csvFile -Leaf)" -ForegroundColor Gray
+        }
+    } else { 
+        Write-Host "  CSV:  FAILED" -ForegroundColor Red 
+    }
     if ($jsonReport) { Write-Host "  JSON: $jsonReport" -ForegroundColor White } else { Write-Host "  JSON: FAILED" -ForegroundColor Red }
     Write-Host ""
     
+    # Output report summary for comprehensive report writing
+    Write-Host "Report Contents Summary:" -ForegroundColor Cyan
+    Write-Host "  - Executive Summary with overall risk rating and key metrics" -ForegroundColor Gray
+    Write-Host "  - CIS Benchmark Compliance Matrix" -ForegroundColor Gray
+    Write-Host "  - Detailed findings with evidence and remediation steps" -ForegroundColor Gray
+    Write-Host "  - Prioritized remediation roadmap (24h/1wk/30d/90d)" -ForegroundColor Gray
+    Write-Host "  - Component-based analysis for team assignment" -ForegroundColor Gray
+    Write-Host "  - Skipped checks requiring manual verification" -ForegroundColor Gray
+    Write-Host ""
+
     # Return summary object for programmatic use
     return @{
         Findings = $script:Findings
@@ -14623,6 +15859,17 @@ function Start-Audit {
             HTML = $htmlReport
             CSV = $csvReport
             JSON = $jsonReport
+        }
+        ReportMetadata = @{
+            TotalFindings = $script:Findings.Count
+            FailedFindings = ($script:Findings | Where-Object { $_.Status -eq "Fail" }).Count
+            PassedFindings = ($script:Findings | Where-Object { $_.Status -eq "Pass" }).Count
+            SkippedChecks = $script:SkippedChecks.Count
+            RiskScore = (($script:Findings | Where-Object { $_.Severity -eq "Critical" -and $_.Status -eq "Fail" }).Count * 40) + 
+                        (($script:Findings | Where-Object { $_.Severity -eq "High" -and $_.Status -eq "Fail" }).Count * 20) + 
+                        (($script:Findings | Where-Object { $_.Severity -eq "Medium" -and $_.Status -eq "Fail" }).Count * 5) + 
+                        (($script:Findings | Where-Object { $_.Severity -eq "Low" -and $_.Status -eq "Fail" }).Count * 1)
+            GeneratedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
         }
     }
 }

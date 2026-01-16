@@ -1,0 +1,2 @@
+"Component","TotalFindings","CriticalCount","HighCount","MediumCount","LowCount","TopCategories","ImmediateActions"
+"CyberArk","6","0","3","3","0","Server Hardening (4); Rate Limiting (1); DNS Security (1)","Implement rate limiting to prevent brute force attacks; Enable auditing for all required subcategories per CyberArk hardening guide; Configure NLA, TLS 1.2+, high encryption, and idle timeout for RDP"
