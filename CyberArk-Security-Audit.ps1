@@ -2,21 +2,27 @@
 .SYNOPSIS
     CyberArk PAM Security Configuration Audit Script - Red Team Edition
 .DESCRIPTION
-    Comprehensive automated security audit for CyberArk Privileged Access Management platform.
+    Comprehensive automated REMOTE security audit for CyberArk Privileged Access Management platform.
     Designed for offensive security professionals, red teamers, and penetration testers.
     
+    IMPORTANT: This tool is designed to run REMOTELY against CyberArk servers via network.
+    It does NOT need to be executed on the CyberArk servers themselves.
+    All checks are performed over the network using PVWA API, port scanning, and web testing.
+    
     Includes:
-    - CIS Benchmark compliance checks
-    - Vendor Best Practice assessments
+    - CIS Benchmark compliance checks (via API)
+    - Vendor Best Practice assessments (via API)
     - Blackbox security testing (exposed endpoints, information disclosure, etc.)
     - Network security analysis (port scanning, vault port security)
     - SSL/TLS cipher suite enumeration
     - CVE-specific vulnerability checks (CVE-2021-31796, CVE-2022-22536, CVE-2023-43903, etc.)
     - 2025 CVE coverage (CVE-2025-22270 through CVE-2025-49831)
     - API security testing (BOLA, injection, mass assignment)
-    - Host security checks (Windows firewall, service accounts, credential caching)
     - Session security and header injection testing
     - Component version detection and vulnerability mapping
+    
+    Optional (if running directly on CyberArk server with -IncludeLocalHostChecks):
+    - Host security checks (Windows firewall, service accounts, credential caching)
     
     New in v4.2 (Red Team Enhancements):
     - OPSEC/Stealth Mode with configurable delays and jitter
@@ -40,7 +46,12 @@
 .PARAMETER SkipPortScan
     Skip network port scanning (faster execution)
 .PARAMETER SkipHostChecks
-    Skip local host security checks (Windows Firewall, services, etc.)
+    [DEPRECATED] Use default behavior - host checks are now skipped by default since this tool runs remotely.
+    Host checks examine the LOCAL machine, not the remote CyberArk servers.
+.PARAMETER IncludeLocalHostChecks
+    Include local host security checks (Windows Firewall, services, registry, etc.)
+    NOTE: These checks examine the LOCAL machine running the script, NOT the remote CyberArk servers.
+    Only enable this if you are running the script directly on a CyberArk server component.
 .PARAMETER SkipCVEChecks
     Skip CVE-specific vulnerability testing
 .PARAMETER SkipAPITests
@@ -171,7 +182,10 @@ param(
     [switch]$SkipPortScan,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipHostChecks,
+    [switch]$SkipHostChecks,  # Deprecated - kept for backward compatibility
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeLocalHostChecks,  # Opt-in for local host checks (off by default for remote audits)
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipCVEChecks,
@@ -981,13 +995,90 @@ function Test-Prerequisites {
     
     # Check for required modules (optional - will skip related checks if not available)
     $optionalModules = @(
-        @{ Name = "NetSecurity"; Checks = "Windows Firewall checks" },
-        @{ Name = "ActiveDirectory"; Checks = "AD security checks (zBang-style)" }
+        @{ Name = "NetSecurity"; Checks = "Windows Firewall checks"; InstallMethod = "WindowsFeature" },
+        @{ Name = "ActiveDirectory"; Checks = "AD security checks (zBang-style)"; InstallMethod = "RSAT" }
     )
+    
+    # Check if running as admin (needed for installing modules)
+    $isAdminForInstall = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     
     foreach ($module in $optionalModules) {
         if (-not (Get-Module -ListAvailable -Name $module.Name -ErrorAction SilentlyContinue)) {
-            $warnings += "Module '$($module.Name)' not available - $($module.Checks) may be skipped"
+            Write-AuditLog "Module '$($module.Name)' not available - attempting automatic installation..." -Level Warning
+            
+            $installed = $false
+            
+            if ($isAdminForInstall) {
+                try {
+                    if ($module.InstallMethod -eq "RSAT" -and $module.Name -eq "ActiveDirectory") {
+                        # Try Windows 10/11 method first (Add-WindowsCapability)
+                        $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+                        $isServer = $osInfo.ProductType -ne 1  # 1 = Workstation, 2 = DC, 3 = Server
+                        
+                        if ($isServer) {
+                            # Windows Server - use Install-WindowsFeature
+                            Write-AuditLog "Detected Windows Server - installing RSAT-AD-PowerShell feature..." -Level Info
+                            $result = Install-WindowsFeature -Name RSAT-AD-PowerShell -ErrorAction Stop
+                            if ($result.Success) {
+                                $installed = $true
+                                Write-AuditLog "Successfully installed RSAT-AD-PowerShell feature" -Level Success
+                            }
+                        } else {
+                            # Windows 10/11 - use Add-WindowsCapability
+                            Write-AuditLog "Detected Windows Client - installing RSAT ActiveDirectory capability..." -Level Info
+                            $capability = Get-WindowsCapability -Online -Name "Rsat.ActiveDirectory.DS-LDS.Tools*" -ErrorAction SilentlyContinue
+                            if ($capability -and $capability.State -ne "Installed") {
+                                $result = Add-WindowsCapability -Online -Name $capability.Name -ErrorAction Stop
+                                if ($result.RestartNeeded -eq $false) {
+                                    $installed = $true
+                                    Write-AuditLog "Successfully installed RSAT ActiveDirectory tools" -Level Success
+                                } else {
+                                    Write-AuditLog "RSAT ActiveDirectory tools installed but restart required" -Level Warning
+                                    $warnings += "Module '$($module.Name)' installed but restart required before use"
+                                }
+                            } elseif ($capability.State -eq "Installed") {
+                                $installed = $true
+                                Write-AuditLog "RSAT ActiveDirectory tools already installed, importing module..." -Level Info
+                            }
+                        }
+                        
+                        # Try to import the module after installation
+                        if ($installed) {
+                            Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+                            if (Get-Module -Name ActiveDirectory -ErrorAction SilentlyContinue) {
+                                Write-AuditLog "ActiveDirectory module imported successfully" -Level Success
+                            }
+                        }
+                    }
+                    elseif ($module.InstallMethod -eq "WindowsFeature" -and $module.Name -eq "NetSecurity") {
+                        # NetSecurity is typically available by default on modern Windows
+                        # Try importing it first
+                        Import-Module NetSecurity -ErrorAction Stop
+                        $installed = $true
+                        Write-AuditLog "NetSecurity module imported successfully" -Level Success
+                    }
+                }
+                catch {
+                    Write-AuditLog "Failed to install module '$($module.Name)': $($_.Exception.Message)" -Level Warning
+                }
+            } else {
+                Write-AuditLog "Cannot auto-install '$($module.Name)' - not running as Administrator" -Level Warning
+            }
+            
+            # Final check if module is now available
+            if (-not $installed -and -not (Get-Module -ListAvailable -Name $module.Name -ErrorAction SilentlyContinue)) {
+                $warnings += "Module '$($module.Name)' not available - $($module.Checks) may be skipped"
+                if (-not $isAdminForInstall) {
+                    $warnings[-1] += " (Run as Administrator to auto-install)"
+                }
+            }
+        } else {
+            # Module available, ensure it's imported
+            try {
+                Import-Module $module.Name -ErrorAction SilentlyContinue
+            } catch {
+                # Ignore import errors, module will be imported when needed
+            }
         }
     }
     
@@ -1005,10 +1096,10 @@ function Test-Prerequisites {
         $warnings += "TLS 1.2/1.3 not enabled by default in this PowerShell session"
     }
     
-    # Check if running as admin (needed for some host checks)
+    # Check if running as admin (only relevant if local host checks are enabled)
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $isAdmin -and -not $SkipHostChecks) {
-        $warnings += "Not running as Administrator - some host security checks may fail"
+    if (-not $isAdmin -and $IncludeLocalHostChecks) {
+        $warnings += "Not running as Administrator - local host security checks may fail"
     }
     
     # Output warnings
@@ -2146,7 +2237,9 @@ function Test-TLSConfiguration {
         $tcpClient = New-Object System.Net.Sockets.TcpClient
         $tcpClient.Connect($uri.Host, $uri.Port)
 
-        $sslStream = New-Object System.Net.Security.SslStream($tcpClient.GetStream(), $false)
+        # Use certificate validation callback to accept self-signed/internal CA certificates
+        # We're testing TLS protocol versions, not certificate validity
+        $sslStream = New-Object System.Net.Security.SslStream($tcpClient.GetStream(), $false, { $true })
         $sslStream.AuthenticateAsClient($uri.Host)
 
         $tlsVersion = $sslStream.SslProtocol
@@ -2591,8 +2684,28 @@ function Test-PVWASecurity {
     Write-AuditLog "Auditing PVWA Security Headers (Vendor Best Practices)..." -Level Info
 
     try {
+        # Ensure certificate validation is bypassed for self-signed/internal CA certificates
+        # (This may have been reset by previous checks)
+        if ($PSVersionTable.PSVersion.Major -lt 6) {
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
+        
+        # Build request parameters
+        $webParams = @{
+            Uri             = "$PVWA/PasswordVault/v10/logon"
+            Method          = "HEAD"
+            UseBasicParsing = $true
+            TimeoutSec      = 10
+            ErrorAction     = "Stop"
+        }
+        
+        # Add SkipCertificateCheck for PowerShell 6+
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $webParams.SkipCertificateCheck = $true
+        }
+        
         # Make a request to PVWA to check security headers
-        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/v10/logon" -Method HEAD -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+        $response = Invoke-WebRequest @webParams
 
         $headers = $response.Headers
 
@@ -3333,8 +3446,9 @@ function Test-CertificateIssues {
         }
         catch { }
 
-        # Reset callback
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+        # Restore callback to accept all certificates (for subsequent checks)
+        # Note: We restore to { $true } instead of $null to maintain certificate bypass for audit
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 
         if ($script:ServerCert) {
             $cert = $script:ServerCert
@@ -8339,6 +8453,73 @@ function Test-UnnecessaryServerRoles {
     Write-AuditLog "Checking for unnecessary server roles (HARD1)..." -Level Info
 
     try {
+        # Detect if running on Windows Server or Windows Client
+        $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+        
+        # Default to workstation if we can't determine OS type (ProductType: 1=Workstation, 2=DC, 3=Server)
+        $isServer = $false
+        if ($osInfo -and $osInfo.ProductType) {
+            $isServer = $osInfo.ProductType -ne 1
+        }
+        
+        if (-not $isServer) {
+            # Windows Client - use Get-WindowsOptionalFeature for feature detection
+            Write-AuditLog "Running on Windows Client - checking optional features instead of server roles" -Level Info
+            
+            # Map server roles to Windows optional features where applicable
+            $unnecessaryFeatures = @(
+                @{ Name = "IIS-WebServer"; Description = "IIS Web Server" },
+                @{ Name = "Microsoft-Hyper-V-All"; Description = "Hyper-V" },
+                @{ Name = "TelnetClient"; Description = "Telnet Client" },
+                @{ Name = "TFTP"; Description = "TFTP Client" },
+                @{ Name = "SMB1Protocol"; Description = "SMB 1.0 Protocol" }
+            )
+            
+            $foundUnnecessary = @()
+            $isPVWA = Test-Path "C:\inetpub\wwwroot\PasswordVault" -ErrorAction SilentlyContinue
+            
+            foreach ($feature in $unnecessaryFeatures) {
+                $installed = Get-WindowsOptionalFeature -Online -FeatureName $feature.Name -ErrorAction SilentlyContinue
+                if ($installed -and $installed.State -eq "Enabled") {
+                    # Allow IIS on PVWA
+                    if ($feature.Name -eq "IIS-WebServer" -and $isPVWA) { continue }
+                    $foundUnnecessary += $feature.Description
+                }
+            }
+            
+            if ($foundUnnecessary.Count -gt 0) {
+                Add-Finding -Category "Server Hardening" `
+                    -CISControl "HARD1" `
+                    -Finding "Unnecessary Windows features enabled" `
+                    -Resource "Windows Optional Features" `
+                    -CurrentValue "$($foundUnnecessary.Count) features: $($foundUnnecessary -join ', ')" `
+                    -ExpectedValue "Minimal features for CyberArk function" `
+                    -Recommendation "Disable unnecessary features to reduce attack surface" `
+                    -Severity "Medium"
+            }
+            else {
+                Add-Finding -Category "Server Hardening" `
+                    -CISControl "HARD1" `
+                    -Finding "Windows features appropriately configured" `
+                    -Resource "Windows Optional Features" `
+                    -CurrentValue "No unnecessary features detected" `
+                    -ExpectedValue "Minimal features" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+            return
+        }
+        
+        # Windows Server - use Get-WindowsFeature
+        # Check if Get-WindowsFeature cmdlet is available
+        if (-not (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue)) {
+            Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" `
+                -CheckName "Unnecessary Server Roles" `
+                -Reason "Get-WindowsFeature cmdlet not available (ServerManager module not installed)" `
+                -Type "NotApplicable"
+            return
+        }
+        
         # Roles that should NOT be installed on CyberArk servers
         $unnecessaryRoles = @(
             "Web-Server",           # IIS (unless PVWA)
@@ -8585,16 +8766,24 @@ function Test-RegistryPermissions {
         $issues = @()
 
         foreach ($path in $criticalPaths) {
-            if (Test-Path $path) {
-                $acl = Get-Acl $path -ErrorAction SilentlyContinue
-                foreach ($ace in $acl.Access) {
-                    # Check for overly permissive access
-                    if ($ace.IdentityReference -match "Everyone|Users|Authenticated Users") {
-                        if ($ace.RegistryRights -match "FullControl|WriteKey|SetValue") {
-                            $issues += "$path allows write by $($ace.IdentityReference)"
+            if (Test-Path $path -ErrorAction SilentlyContinue) {
+                try {
+                    $acl = Get-Acl $path -ErrorAction SilentlyContinue
+                    if (-not $acl) { continue }
+                    
+                    foreach ($ace in $acl.Access) {
+                        try {
+                            # Check for overly permissive access
+                            if ($ace.IdentityReference -match "Everyone|Users|Authenticated Users") {
+                                if ($ace.RegistryRights -match "FullControl|WriteKey|SetValue") {
+                                    $issues += "$path allows write by $($ace.IdentityReference)"
+                                }
+                            }
                         }
+                        catch { }
                     }
                 }
+                catch { }
             }
         }
 
@@ -8640,10 +8829,10 @@ function Test-RegistryAuditing {
         $auditConfigured = $false
 
         foreach ($path in $criticalPaths) {
-            if (Test-Path $path) {
+            if (Test-Path $path -ErrorAction SilentlyContinue) {
                 try {
                     $acl = Get-Acl $path -Audit -ErrorAction SilentlyContinue
-                    if ($acl.Audit.Count -gt 0) {
+                    if ($acl -and $acl.Audit.Count -gt 0) {
                         $auditConfigured = $true
                         break
                     }
@@ -8685,25 +8874,92 @@ function Test-FileSystemPermissions {
     Write-AuditLog "Checking file system permissions (HARD7)..." -Level Info
 
     try {
-        # Critical paths per CYBRHardeningCheck
+        # Check if running as admin (required for some paths)
+        $isAdmin = $false
+        try {
+            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        }
+        catch {
+            # If we can't determine admin status, assume non-admin
+            Write-AuditLog "Could not determine admin status, assuming non-admin" -Level Warning
+        }
+        
+        # Critical paths per CYBRHardeningCheck - include paths accessible without admin
         $criticalPaths = @(
-            "$env:SystemRoot\System32\Config",
-            "$env:SystemRoot\System32\Config\RegBack"
+            @{ Path = "$env:SystemRoot\System32\Config"; RequiresAdmin = $true },
+            @{ Path = "$env:SystemRoot\System32\Config\RegBack"; RequiresAdmin = $true },
+            @{ Path = "$env:ProgramData"; RequiresAdmin = $false },
+            @{ Path = "$env:SystemRoot\Temp"; RequiresAdmin = $false }
         )
+        
+        # Add CyberArk-specific paths if they exist
+        $cyberArkPaths = @(
+            "C:\Program Files (x86)\CyberArk",
+            "C:\CyberArk"
+        )
+        foreach ($caPath in $cyberArkPaths) {
+            if (Test-Path $caPath -ErrorAction SilentlyContinue) {
+                $criticalPaths += @{ Path = $caPath; RequiresAdmin = $false }
+            }
+        }
 
         $issues = @()
+        $pathsChecked = 0
+        $pathsSkipped = 0
 
-        foreach ($path in $criticalPaths) {
-            if (Test-Path $path) {
-                $acl = Get-Acl $path -ErrorAction SilentlyContinue
-                foreach ($ace in $acl.Access) {
-                    if ($ace.IdentityReference -match "Everyone|Users") {
-                        if ($ace.FileSystemRights -match "FullControl|Modify|Write") {
-                            $issues += "$path writable by $($ace.IdentityReference)"
+        foreach ($pathInfo in $criticalPaths) {
+            $path = $pathInfo.Path
+            
+            # Skip admin-required paths if not running as admin
+            if ($pathInfo.RequiresAdmin -and -not $isAdmin) {
+                $pathsSkipped++
+                continue
+            }
+            
+            if (Test-Path $path -ErrorAction SilentlyContinue) {
+                try {
+                    $acl = Get-Acl $path -ErrorAction SilentlyContinue
+                    if (-not $acl) {
+                        $pathsSkipped++
+                        continue
+                    }
+                    $pathsChecked++
+                    
+                    foreach ($ace in $acl.Access) {
+                        try {
+                            if ($ace.IdentityReference -match "Everyone|Users|Authenticated Users") {
+                                $rights = $ace.FileSystemRights.ToString()
+                                if ($rights -match "FullControl|Modify|Write" -and $rights -notmatch "Synchronize") {
+                                    # Exclude inherited permissions on common directories
+                                    if (-not ($path -eq "$env:ProgramData" -and $ace.IsInherited)) {
+                                        $issues += "$path writable by $($ace.IdentityReference)"
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            # Skip this ACE if we can't read it
                         }
                     }
                 }
+                catch [System.UnauthorizedAccessException] {
+                    # Access denied or missing privilege - need admin rights
+                    $pathsSkipped++
+                }
+                catch {
+                    # Other error (including "unauthorized operation") - continue with next path
+                    $pathsSkipped++
+                }
             }
+        }
+        
+        # If we couldn't check any paths, report as skipped
+        if ($pathsChecked -eq 0) {
+            Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD7" `
+                -CheckName "File System Permissions" `
+                -Reason "Could not access any critical paths (run as Administrator for full check)" `
+                -Type "InsufficientPrivileges"
+            return
         }
 
         if ($issues.Count -gt 0) {
@@ -8717,10 +8973,11 @@ function Test-FileSystemPermissions {
                 -Severity "Critical"
         }
         else {
+            $note = if ($pathsSkipped -gt 0) { " ($pathsSkipped paths skipped - run as Admin for full check)" } else { "" }
             Add-Finding -Category "Server Hardening" `
                 -CISControl "HARD7" `
                 -Finding "File system permissions appropriately configured" `
-                -Resource "Critical File Paths" `
+                -Resource "Critical File Paths ($pathsChecked checked$note)" `
                 -CurrentValue "No overly permissive ACLs" `
                 -ExpectedValue "Restrictive permissions" `
                 -Severity "Info" `
@@ -9477,9 +9734,24 @@ function Test-PVWAWebDAV {
     Write-AuditLog "Checking WebDAV disabled (PVWAH2)..." -Level Info
 
     try {
-        $webdav = Get-WindowsFeature -Name Web-DAV-Publishing -ErrorAction SilentlyContinue
+        $webdavInstalled = $false
         
-        if ($webdav -and $webdav.Installed) {
+        # Detect if running on Windows Server or Windows Client
+        $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+        $isServer = $osInfo.ProductType -ne 1  # 1 = Workstation, 2 = DC, 3 = Server
+        
+        if ($isServer -and (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue)) {
+            # Windows Server - use Get-WindowsFeature
+            $webdav = Get-WindowsFeature -Name Web-DAV-Publishing -ErrorAction SilentlyContinue
+            $webdavInstalled = $webdav -and $webdav.Installed
+        }
+        else {
+            # Windows Client - use Get-WindowsOptionalFeature
+            $webdav = Get-WindowsOptionalFeature -Online -FeatureName "IIS-WebDAV" -ErrorAction SilentlyContinue
+            $webdavInstalled = $webdav -and $webdav.State -eq "Enabled"
+        }
+        
+        if ($webdavInstalled) {
             Add-Finding -Category "PVWA Hardening" `
                 -CISControl "PVWAH2" `
                 -Finding "WebDAV is installed" `
@@ -15680,17 +15952,26 @@ function Start-Audit {
 
     #======================================================================
     # PHASE 3: HOST SECURITY CHECKS (Local admin on CyberArk server)
+    # NOTE: This tool is designed for REMOTE auditing. Host checks examine
+    # the LOCAL machine, not the CyberArk servers. Only enable with
+    # -IncludeLocalHostChecks if running directly on a CyberArk server.
     #======================================================================
-    if (-not $SkipHostChecks) {
+    
+    # Determine if host checks should run (default: skip for remote audits)
+    $runHostChecks = $IncludeLocalHostChecks -and (-not $SkipHostChecks)
+    
+    if ($runHostChecks) {
         Write-Host ""
         Write-Host "+============================================================+" -ForegroundColor Blue
-    Write-Host "|  PHASE 3: HOST SECURITY CHECKS                           |" -ForegroundColor Blue
-    Write-Host "|  (Requires local admin on CyberArk server)               |" -ForegroundColor Blue
+        Write-Host "|  PHASE 3: LOCAL HOST SECURITY CHECKS                     |" -ForegroundColor Blue
+        Write-Host "|  (Checking THIS machine - ensure you're on CyberArk server)|" -ForegroundColor Blue
         Write-Host "+============================================================+" -ForegroundColor Blue
         Write-Host ""
-        Write-Host "  The following checks require local execution on the" -ForegroundColor Cyan
-        Write-Host "  CyberArk server with administrative privileges:" -ForegroundColor Cyan
+        Write-Host "  WARNING: These checks examine the LOCAL machine." -ForegroundColor Yellow
+        Write-Host "  Only use -IncludeLocalHostChecks when running directly" -ForegroundColor Yellow
+        Write-Host "  on a CyberArk server component." -ForegroundColor Yellow
         Write-Host ""
+        Write-Host "  Checking:" -ForegroundColor Cyan
         Write-Host "  - Windows Firewall configuration" -ForegroundColor Gray
         Write-Host "  - CyberArk service account settings" -ForegroundColor Gray
         Write-Host "  - Credential caching (WDigest, LSA Protection)" -ForegroundColor Gray
@@ -15738,30 +16019,62 @@ function Start-Audit {
         }
     }
     else {
+        # Host checks skipped (default for remote audits)
         Write-Host ""
         Write-Host "+============================================================+" -ForegroundColor DarkGray
+        Write-Host "|  PHASE 3: HOST SECURITY CHECKS - SKIPPED (Remote Audit)  |" -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Host checks are skipped by default for remote audits." -ForegroundColor DarkGray
+        Write-Host "  These checks examine the LOCAL machine, not CyberArk servers." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  To run local host checks (only if on a CyberArk server):" -ForegroundColor DarkGray
+        Write-Host "    -IncludeLocalHostChecks" -ForegroundColor Gray
+        Write-Host ""
 
+        # Record skipped checks with appropriate reason
+        $skipReason = "Remote audit - host checks examine local machine, not CyberArk servers. Use -IncludeLocalHostChecks if running on CyberArk server."
+        
         Add-SkippedCheck -Category "Host Security" -CISControl "HOST1" `
             -CheckName "Windows Firewall Configuration" `
-            -Reason "Skipped via -SkipHostChecks parameter" `
-            -Type "Skipped"
+            -Reason $skipReason `
+            -Type "NotApplicable"
         Add-SkippedCheck -Category "Host Security" -CISControl "HOST2" `
             -CheckName "Service Account Privileges" `
-            -Reason "Skipped via -SkipHostChecks parameter" `
-            -Type "Skipped"
+            -Reason $skipReason `
+            -Type "NotApplicable"
         Add-SkippedCheck -Category "Host Security" -CISControl "HOST3" `
             -CheckName "Credential Caching Configuration" `
-            -Reason "Skipped via -SkipHostChecks parameter" `
-            -Type "Skipped"
+            -Reason $skipReason `
+            -Type "NotApplicable"
         Add-SkippedCheck -Category "Host Security" -CISControl "HOST4" `
             -CheckName "Event Log Configuration" `
-            -Reason "Skipped via -SkipHostChecks parameter" `
-            -Type "Skipped"
+            -Reason $skipReason `
+            -Type "NotApplicable"
         Add-SkippedCheck -Category "Host Security" -CISControl "HOST5" `
             -CheckName "Antivirus/EDR Status" `
-            -Reason "Skipped via -SkipHostChecks parameter" `
-            -Type "Skipped"
+            -Reason $skipReason `
+            -Type "NotApplicable"
+        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" `
+            -CheckName "Server Hardening Checks" `
+            -Reason $skipReason `
+            -Type "NotApplicable"
+        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT1" `
+            -CheckName "Vault Hardening Checks" `
+            -Reason $skipReason `
+            -Type "NotApplicable"
+        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH1" `
+            -CheckName "PSM Hardening Checks" `
+            -Reason $skipReason `
+            -Type "NotApplicable"
+        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH1" `
+            -CheckName "PVWA Hardening Checks" `
+            -Reason $skipReason `
+            -Type "NotApplicable"
+        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH1" `
+            -CheckName "CPM Hardening Checks" `
+            -Reason $skipReason `
+            -Type "NotApplicable"
     }
 
     #======================================================================
@@ -15815,11 +16128,11 @@ function Start-Audit {
     else {
         Write-Host "  Phase 2 (Authenticated):   Failed (auth error)" -ForegroundColor Red
     }
-    if (-not $SkipHostChecks) {
-        Write-Host "  Phase 3 (Host Security):   Completed" -ForegroundColor Green
+    if ($IncludeLocalHostChecks -and (-not $SkipHostChecks)) {
+        Write-Host "  Phase 3 (Host Security):   Completed (local machine)" -ForegroundColor Green
     }
     else {
-        Write-Host "  Phase 3 (Host Security):   Skipped (by parameter)" -ForegroundColor DarkGray
+        Write-Host "  Phase 3 (Host Security):   Skipped (remote audit - use -IncludeLocalHostChecks if on CyberArk server)" -ForegroundColor DarkGray
     }
     Write-Host ""
     Write-Host "Findings:" -ForegroundColor Cyan
