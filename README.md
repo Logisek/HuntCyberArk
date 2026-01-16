@@ -1,30 +1,10 @@
-# CyberArk Security Audit Suite v4.3 - Security Posture Expansion
+# HuntCyberArk - CyberArk Security Audit Suite
 
 A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. **Designed for offensive security professionals, red teamers, and penetration testers.**
 
-This tool performs extensive security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur). **v4.3 adds 86+ new checks across 15 security domains covering cloud-native secrets, Kubernetes, DevSecOps, and advanced threat detection.**
+This tool performs 200+ security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur).
 
-## What's New in v4.3 (Security Posture Expansion)
-
-| Category | Prefix | Tests | Description |
-|----------|--------|-------|-------------|
-| **Secrets Hub** | SH1-SH6 | 6 | Cloud-native secrets sync to AWS/Azure/GCP |
-| **Remote Access** | RA1-RA6 | 6 | Vendor/Alero privileged access security |
-| **Kubernetes** | K8S1-K8S8 | 8 | Container secrets and Secrets Provider |
-| **DevSecOps** | DSO1-DSO6 | 6 | CI/CD pipeline security and secrets sprawl |
-| **Privilege Cloud** | PC1-PC5 | 5 | SaaS-specific connector and tenant checks |
-| **CyberArk Identity** | IDN1-IDN6 | 6 | SSO, adaptive MFA, lifecycle sync |
-| **Custom Plugins** | PLG1-PLG5 | 5 | PSM/CPM plugin security and signatures |
-| **Backup Security** | BKP1-BKP5 | 5 | Encryption, permissions, restoration testing |
-| **HSM Integration** | HSM1-HSM4 | 4 | Hardware security module connectivity |
-| **PTA Deep Dive** | PTAD1-PTAD6 | 6 | Detection rules, ML quality, alert fatigue |
-| **Third-Party Integration** | TPI1-TPI5 | 5 | SIEM, ITSM, SOAR connectivity |
-| **Operational Hygiene** | OPS1-OPS8 | 8 | Onboarding backlog, failures, metrics |
-| **Attack Path Simulation** | APS1-APS6 | 6 | PtH, NTLM relay, Kerberoasting |
-| **Supply Chain Integrity** | SCI1-SCI5 | 5 | File hashes, signatures, patch currency |
-| **Network Segmentation** | NSG1-NSG5 | 5 | Vault isolation, micro-segmentation |
-
-## What's New in v4.2 (Red Team Edition)
+## Key Features
 
 | Feature | Description |
 |---------|-------------|
@@ -59,7 +39,7 @@ This tool performs extensive security checks including CIS Benchmark compliance,
 
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| PowerShell | 5.1 | 7.x |
+| PowerShell | 7.0 | 7.x (latest) |
 | .NET Framework | 4.5 | 4.8+ |
 | Operating System | Windows 10/Server 2016 | Windows 11/Server 2022 |
 | Memory | 2 GB available | 4 GB available |
@@ -97,7 +77,9 @@ Open PowerShell and run:
 $PSVersionTable.PSVersion
 ```
 
-Ensure the Major version is 5 or higher. If not, [download PowerShell 7.x](https://github.com/PowerShell/PowerShell/releases).
+Ensure the Major version is **7 or higher**. If not, [download PowerShell 7.x](https://github.com/PowerShell/PowerShell/releases).
+
+> **Note:** This script requires PowerShell 7.0 or later. Windows PowerShell 5.1 is not supported.
 
 ### Step 2: Download the Script
 
@@ -188,13 +170,13 @@ Deep configuration audits requiring CyberArk REST API access:
 - Authentication method settings
 - Component health status
 - Master Policy, PSM, CPM, PTA configurations
-- **NEW in v4.0**: Machine Identity Security (service accounts, AppIDs)
-- **NEW in v4.0**: Secrets Management (CP/CCP configuration)
-- **NEW in v4.0**: Zero Standing Privileges (JIT access assessment)
-- **NEW in v4.0**: Identity Governance (orphaned identities, permission drift)
-- **NEW in v4.0**: Cloud Security (AWS/Azure/GCP integration)
-- **NEW in v4.0**: Disaster Recovery (DR Vault, HA cluster health)
-- **NEW in v4.0**: Compliance Mapping (NIST, SOC 2, PCI-DSS)
+- Machine Identity Security (service accounts, AppIDs)
+- Secrets Management (CP/CCP configuration)
+- Zero Standing Privileges (JIT access assessment)
+- Identity Governance (orphaned identities, permission drift)
+- Cloud Security (AWS/Azure/GCP integration)
+- Disaster Recovery (DR Vault, HA cluster health)
+- Compliance Mapping (NIST, SOC 2, PCI-DSS)
 
 **Required Permissions**: Vault Admin or Auditor role recommended
 
@@ -224,7 +206,7 @@ Windows host hardening checks requiring local execution:
 | Security Bulletins | CA25-x | CyberArk security bulletin checks |
 | API Security | API1 - API5 | REST API security testing |
 | Host Security | HOST1 - HOST5 | Windows host hardening checks |
-| **New in v4.0** | | |
+| **Advanced Security** | | |
 | Machine Identity | MID1 - MID9 | Service account, AppID, and AIM Provider security |
 | Secrets Management | SEC1 - SEC14 | Credential Provider/CCP and Conjur security |
 | Zero Standing Privileges | ZSP1 - ZSP5 | JIT access and privilege assessment |
@@ -234,7 +216,7 @@ Windows host hardening checks requiring local execution:
 | Disaster Recovery | DR1 - DR5 | HA and DR configuration |
 | Compliance Mapping | COMP1 - COMP4 | NIST, SOC2, PCI-DSS alignment |
 | Audit Logging | AUD1 - AUD4 | SIEM and logging validation |
-| **New in v4.1 (CyberArk Tools Integration)** | | |
+| **CyberArk Tools Integration** | | |
 | AD Security (zBang) | AD1 - AD7 | Shadow admins, Skeleton Key, SID History, SPNs, Kerberos delegation |
 | Server Hardening (CYBRHardeningCheck) | HARD1 - HARD8 | Server roles, audit policy, RDP, registry, filesystem |
 | Vault Hardening | VAULT1 - VAULT6 | NIC hardening, static IP, domain membership, firewall, certificates |
@@ -242,7 +224,7 @@ Windows host hardening checks requiring local execution:
 | PVWA Hardening | PVWAH1 - PVWAH8 | WebDAV, IIS config, app pool, MIME types, cryptography |
 | CPM Hardening | CPMH1 - CPMH4 | FIPS, DEP, credential files, service accounts |
 | Application Control (Evasor) | APPCTL1 - APPCTL5 | DLL injection/hijacking, AppLocker bypasses |
-| **New in v4.3 (Security Posture Expansion)** | | |
+| **Security Posture Expansion** | | |
 | Secrets Hub | SH1 - SH6 | Cloud secrets sync health, latency, version drift |
 | Remote Access / Alero | RA1 - RA6 | Vendor invitation, MFA, session limits, device binding |
 | Kubernetes Secrets | K8S1 - K8S8 | Secrets Provider, RBAC, pod security, Conjur follower |
@@ -355,7 +337,7 @@ Windows host hardening checks requiring local execution:
 - Header injection (Host header, CRLF)
 - XXE vulnerability testing on SOAP endpoints
 
-#### Machine Identity Security (MID1 - MID6) - NEW in v4.0
+#### Machine Identity Security (MID1 - MID6)
 - Service account enumeration and privilege analysis
 - Machine identity password rotation validation
 - Over-privileged service account detection
@@ -363,7 +345,7 @@ Windows host hardening checks requiring local execution:
 - AppID security validation (allowed machines, OS user restrictions)
 - Stale machine identity detection
 
-#### Secrets Management (SEC1 - SEC8) - NEW in v4.0
+#### Secrets Management (SEC1 - SEC8)
 - Credential Provider (CP/CCP) deployment verification
 - AppID authentication method strength analysis
 - Allowed machines configuration validation
@@ -373,7 +355,7 @@ Windows host hardening checks requiring local execution:
 - Orphan/unmanaged secrets detection
 - Credential sprawl analysis
 
-#### Zero Standing Privileges (ZSP1 - ZSP5) - NEW in v4.0
+#### Zero Standing Privileges (ZSP1 - ZSP5)
 - Permanent privileged access detection
 - Dual control workflow validation
 - Concurrent session limit checks
@@ -381,7 +363,7 @@ Windows host hardening checks requiring local execution:
 - Standing privilege reduction recommendations
 - JIT readiness scoring
 
-#### Identity Governance (IGA1 - IGA8) - NEW in v4.0
+#### Identity Governance (IGA1 - IGA8)
 - Orphaned identity detection
 - Permission drift analysis
 - Inactive user account detection
@@ -391,7 +373,7 @@ Windows host hardening checks requiring local execution:
 - Pending account queue age
 - Account ownership gap detection
 
-#### EPM Integration (EPM1 - EPM6) - NEW in v4.0
+#### EPM Integration (EPM1 - EPM6)
 *Requires EPM URL and optional authentication*
 - EPM integration status verification
 - Default policy security assessment
@@ -400,7 +382,7 @@ Windows host hardening checks requiring local execution:
 - Elevation request justification requirements
 - EPM audit logging configuration
 
-#### Cloud Security (CLD1 - CLD6) - NEW in v4.0
+#### Cloud Security (CLD1 - CLD6)
 - Cloud provider integration status (AWS, Azure, GCP)
 - Federated identity configuration
 - Cloud secret sync policy validation
@@ -408,26 +390,26 @@ Windows host hardening checks requiring local execution:
 - Cloud IAM role binding analysis
 - Multi-cloud policy consistency
 
-#### Disaster Recovery (DR1 - DR5) - NEW in v4.0
+#### Disaster Recovery (DR1 - DR5)
 - DR Vault replication status
 - HA cluster health verification
 - Component redundancy assessment
 - Backup configuration validation
 - Break-glass account availability
 
-#### Compliance Mapping (COMP1 - COMP4) - NEW in v4.0
+#### Compliance Mapping (COMP1 - COMP4)
 - NIST Cybersecurity Framework mapping
 - SOC 2 Type II alignment indicators
 - PCI-DSS relevant controls
 - CyberArk Blueprint maturity scoring
 
-#### Audit Logging (AUD1 - AUD4) - NEW in v4.0
+#### Audit Logging (AUD1 - AUD4)
 - SIEM integration health
 - Audit log retention configuration
 - Critical event alerting validation
 - Audit data integrity verification
 
-#### Active Directory Security (AD1 - AD7) - NEW in v4.1 (zBang-inspired)
+#### Active Directory Security (AD1 - AD7) - zBang-inspired
 *Requires domain connectivity and -IncludeADChecks parameter*
 - **Shadow Admin Discovery**: Detect accounts with direct ACL permissions on privileged objects
 - **Skeleton Key Detection**: Check for Skeleton Key malware indicators on Domain Controllers
@@ -437,7 +419,7 @@ Windows host hardening checks requiring local execution:
 - **Constrained Delegation with Protocol Transition**: Detect S4U2Self abuse potential
 - **Delegation Privilege Audit**: Comprehensive delegation configuration summary
 
-#### Server Hardening (HARD1 - HARD8) - NEW in v4.1 (CYBRHardeningCheck-inspired)
+#### Server Hardening (HARD1 - HARD8) - CYBRHardeningCheck-inspired
 *Runs automatically on CyberArk servers*
 - Unnecessary Windows Server roles detection
 - Screen saver configuration validation
@@ -448,7 +430,7 @@ Windows host hardening checks requiring local execution:
 - File system permissions on Config directories
 - File system auditing on critical paths
 
-#### Vault Hardening (VAULT1 - VAULT6) - NEW in v4.1
+#### Vault Hardening (VAULT1 - VAULT6)
 *Runs automatically on Vault servers*
 - NIC hardening (single NIC, minimal protocols)
 - Static IP configuration (no DHCP)
@@ -457,7 +439,7 @@ Windows host hardening checks requiring local execution:
 - Firewall non-standard rules detection
 - Vault server certificate validation
 
-#### PSM Hardening (PSMH1 - PSMH10) - NEW in v4.1
+#### PSM Hardening (PSMH1 - PSMH10)
 *Runs automatically on PSM servers*
 - PSM user configuration validation
 - Remote Desktop Users group cleared
@@ -468,7 +450,7 @@ Windows host hardening checks requiring local execution:
 - PSM user access restrictions
 - SMB services hardening
 
-#### PVWA Hardening (PVWAH1 - PVWAH8) - NEW in v4.1
+#### PVWA Hardening (PVWAH1 - PVWAH8)
 *Runs automatically on PVWA servers*
 - WebDAV disabled verification
 - Anonymous authentication disabled
@@ -477,14 +459,14 @@ Windows host hardening checks requiring local execution:
 - Cryptography settings (FIPS)
 - Installation location (non-system drive)
 
-#### CPM Hardening (CPMH1 - CPMH4) - NEW in v4.1
+#### CPM Hardening (CPMH1 - CPMH4)
 *Runs automatically on CPM servers*
 - FIPS cryptography mode
 - DEP (Data Execution Prevention) configuration
 - Credential file permissions
 - Service account configuration
 
-#### Application Control (APPCTL1 - APPCTL5) - NEW in v4.1 (Evasor-inspired)
+#### Application Control (APPCTL1 - APPCTL5) - Evasor-inspired
 *Requires -IncludeAppControlChecks parameter*
 - **DLL Injection Vulnerability**: Check for processes vulnerable to DLL injection via MavInject
 - **DLL Hijacking Risk**: Identify writable directories in CyberArk paths
@@ -492,14 +474,14 @@ Windows host hardening checks requiring local execution:
 - **AppLocker Bypass Paths**: Check for writable bypass locations
 - **Writable System Paths**: Identify writable paths in system directories
 
-#### Conjur Integration (SEC9 - SEC14) - NEW in v4.1
+#### Conjur Integration (SEC9 - SEC14)
 *Requires -IncludeConjurChecks and -ConjurUrl parameters*
 - Conjur health check
 - Authenticator configuration (LDAP, OIDC, IAM, K8s)
 - API key rotation policy verification
 - Audit logging configuration
 
-#### AIM Provider Security (MID7 - MID9) - NEW in v4.1
+#### AIM Provider Security (MID7 - MID9)
 *Runs automatically on servers with AIM Provider*
 - AIM Provider deployment verification
 - Configuration file security
@@ -511,7 +493,7 @@ Windows host hardening checks requiring local execution:
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| PowerShell | 5.1+ | PowerShell 7.x recommended for best performance |
+| PowerShell | 7.0+ | PowerShell 7.x required (Windows PowerShell 5.1 not supported) |
 | .NET Framework | 4.5+ | Required for TLS/SSL and network operations |
 | CyberArk PVWA | v12+ | REST API v12 or later for full compatibility |
 
@@ -547,7 +529,7 @@ The script uses these Windows/PowerShell features (no installation required):
 ## Quick Start
 
 ```powershell
-# 1. Verify PowerShell version (need 5.1+)
+# 1. Verify PowerShell version (need 7.0+)
 $PSVersionTable.PSVersion
 
 # 2. Enable TLS 1.2
@@ -610,7 +592,7 @@ $cred = Get-Credential
     -PortScanTimeout 2000 `
     -VerboseOutput
 
-# Full audit with v4.0 features including compliance mapping
+# Full audit with compliance mapping
 .\CyberArk-Security-Audit.ps1 `
     -PVWA "https://pvwa.domain.com" `
     -AuthType LDAP `
@@ -636,7 +618,7 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan -SkipCVEChecks
 ```
 
-### New v4.2 Scenarios (Red Team Edition)
+### Red Team Scenarios
 
 ```powershell
 # OPSEC Mode - Stealth scanning for red team operations
@@ -674,7 +656,7 @@ $cred = Get-Credential
     -UnauthenticatedOnly
 ```
 
-### v4.1 Scenarios (CyberArk Tools Integration)
+### CyberArk Tools Integration Scenarios
 
 ```powershell
 # AD Security Audit (zBang-inspired) - detect shadow admins, Kerberos issues
@@ -692,7 +674,7 @@ $cred = Get-Credential
 # Conjur/Secrets Manager integration check
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeConjurChecks -ConjurUrl "https://conjur.domain.com"
 
-# Comprehensive audit with all v4.1 features
+# Comprehensive audit with CyberArk tools integration
 .\CyberArk-Security-Audit.ps1 `
     -PVWA "https://pvwa.domain.com" `
     -AuthType LDAP `
@@ -706,7 +688,7 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipHardeningChecks
 ```
 
-### v4.3 Scenarios (Security Posture Expansion)
+### Security Posture Expansion Scenarios
 
 ```powershell
 # Secrets Hub - Cloud secrets sync validation
@@ -765,7 +747,7 @@ $cred = Get-Credential
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP `
     -IncludeNetworkSegmentationChecks
 
-# Comprehensive v4.3 audit with all new checks
+# Comprehensive audit with all security posture checks
 .\CyberArk-Security-Audit.ps1 `
     -PVWA "https://pvwa.domain.com" `
     -AuthType LDAP `
@@ -811,13 +793,13 @@ $cred = Get-Credential
 | UnauthenticatedOnly | No | False | Run only Phase 1 (no credentials needed) |
 | IncludeEPMChecks | No | False | Include EPM integration checks |
 | ComplianceMapping | No | False | Generate compliance framework mapping |
-| **New in v4.1 Parameters** | | | |
+| **CyberArk Tools Parameters** | | | |
 | IncludeADChecks | No | False | Enable Active Directory security checks (zBang-inspired) |
 | IncludeAppControlChecks | No | False | Enable application control bypass detection (Evasor-inspired) |
 | IncludeConjurChecks | No | False | Enable Conjur/Secrets Manager integration checks |
 | ConjurUrl | No | - | Conjur server URL for integration checks |
 | DomainController | No | - | Domain controller for AD security queries |
-| **New in v4.2 Parameters (Red Team)** | | | |
+| **Red Team Parameters** | | | |
 | OPSECMode / Stealth | No | False | Enable OPSEC/stealth mode with delays and reduced noise |
 | Proxy | No | - | Proxy URL for traffic routing (e.g., http://127.0.0.1:8080) |
 | ProxyCredential | No | - | Credentials for authenticated proxy |
@@ -834,7 +816,7 @@ $cred = Get-Credential
 | QuietMode | No | False | Reduce console output (info messages suppressed) |
 | **EPM Parameters** | | | |
 | EPMUrl | No | - | EPM server URL for EPM integration checks |
-| **New in v4.3 Parameters (Security Posture Expansion)** | | | |
+| **Security Posture Parameters** | | | |
 | IncludeSecretsHubChecks | No | False | Enable Secrets Hub cloud sync checks |
 | SecretsHubUrl | No | - | Secrets Hub URL for integration checks |
 | IncludeRemoteAccessChecks | No | False | Enable Remote Access/Alero checks |
@@ -1060,7 +1042,7 @@ If you encounter issues not covered above:
 - [CyberArk Security Bulletins](https://www.cyberark.com/resources/security-bulletins)
 - [CyberArk REST API Documentation](https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Implementing%20Privileged%20Account%20Security%20Web%20Services%20.htm)
 
-### CyberArk Open Source Security Tools (v4.1 Integration Sources)
+### CyberArk Open Source Security Tools
 - [zBang](https://github.com/cyberark/zBang) - Risk assessment tool for privileged account threats (Shadow Admins, Kerberos, SPNs)
 - [CYBRHardeningCheck](https://github.com/cyberark/CYBRHardeningCheck) - CyberArk component server hardening verification
 - [Evasor](https://github.com/cyberark/Evasor) - Application control bypass detection tool
@@ -1084,7 +1066,7 @@ This tool is provided as-is for security assessment purposes. Use responsibly an
 ### Version 4.3 (Security Posture Expansion)
 Major update expanding security check coverage with 86+ new tests across 15 security domains:
 
-**New Check Categories (v4.3):**
+**Security Posture Check Categories:**
 
 | Category | Controls | Description |
 |----------|----------|-------------|
