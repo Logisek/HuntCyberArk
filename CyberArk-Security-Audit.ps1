@@ -951,9 +951,8 @@ function Show-Banner {
     Write-Host "╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
     Write-Host ""
     Write-Host "    CyberArk PAM Security Configuration Audit" -ForegroundColor Yellow
-    Write-Host "    Red Team / Offensive Security Edition" -ForegroundColor Red
+    Write-Host "    https://logisek.com | info@logisek.com" -ForegroundColor DarkGray
     Write-Host "    https://github.com/yourrepo/HuntCyberArk" -ForegroundColor DarkGray
-    Write-Host "    Version 4.3" -ForegroundColor DarkGray
     Write-Host ""
 }
 #endregion
