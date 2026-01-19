@@ -1063,6 +1063,7 @@ C:\SecurityReports\CyberArk\
 | K8sNamespace | No | default | Kubernetes namespace for secrets checks |
 | ConjurApplianceUrl | No | - | Conjur appliance URL for K8s integration |
 | IncludeDevSecOpsChecks | No | False | Enable DevSecOps pipeline security checks |
+| IncludePrivilegeCloudChecks | No | False | Enable Privilege Cloud/SaaS-specific checks |
 | IsPrivilegeCloud | No | False | Indicate target is Privilege Cloud SaaS |
 | PrivilegeCloudTenant | No | - | Privilege Cloud tenant identifier |
 | IncludeIdentityChecks | No | False | Enable CyberArk Identity/Idaptive checks |

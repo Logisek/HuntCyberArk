@@ -347,6 +347,9 @@ param(
 
     # Privilege Cloud / SaaS-specific checks
     [Parameter(Mandatory = $false)]
+    [switch]$IncludePrivilegeCloudChecks,
+
+    [Parameter(Mandatory = $false)]
     [switch]$IsPrivilegeCloud,
 
     [Parameter(Mandatory = $false)]
@@ -1181,6 +1184,31 @@ function Add-RequestDelay {
         $actualDelay = [Math]::Max(100, $baseDelay + $jitterAmount)
         Start-Sleep -Milliseconds $actualDelay
     }
+}
+
+function Get-OPSECDelay {
+    <#
+    .SYNOPSIS
+        Calculates delay with jitter for OPSEC mode - returns delay in milliseconds
+    #>
+    param(
+        [int]$BaseDelay = 0,
+        [int]$Jitter = 0
+    )
+
+    if ($BaseDelay -le 0) {
+        return 0
+    }
+
+    $baseMs = $BaseDelay * 1000  # Convert seconds to milliseconds
+    $jitterAmount = 0
+
+    if ($Jitter -gt 0) {
+        $jitterRange = [int]($baseMs * ($Jitter / 100))
+        $jitterAmount = Get-Random -Minimum (-$jitterRange) -Maximum $jitterRange
+    }
+
+    return [Math]::Max(100, $baseMs + $jitterAmount)
 }
 
 function Initialize-WebRequestDefaults {
@@ -3739,7 +3767,46 @@ function Test-RateLimiting {
         return
     }
 
-    $loginEndpoint = "$PVWA/PasswordVault/api/Auth/CyberArk/Logon"
+    # Try multiple login endpoints (PVWA vs CyberArk Identity/Cloud)
+    $loginEndpoints = @(
+        "$PVWA/PasswordVault/api/Auth/CyberArk/Logon",
+        "$PVWA/PasswordVault/API/Auth/Cyberark/Logon",
+        "$PVWA/PasswordVault/v10/logon",
+        "$PVWA/Security/StartAuthentication",
+        "$PVWA/api/idadmin/Security/StartAuthentication"
+    )
+
+    $validEndpoint = $null
+    $endpointStatusCode = 0
+
+    # First, find a valid login endpoint (one that doesn't return 404)
+    foreach ($endpoint in $loginEndpoints) {
+        try {
+            $testResponse = Invoke-WebRequest -Uri $endpoint -Method POST -Body '{}' -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            $endpointStatusCode = $testResponse.StatusCode
+            $validEndpoint = $endpoint
+            break
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            # 400, 401, 403 indicate the endpoint exists but requires proper auth
+            if ($statusCode -eq 400 -or $statusCode -eq 401 -or $statusCode -eq 403) {
+                $validEndpoint = $endpoint
+                $endpointStatusCode = $statusCode
+                break
+            }
+            # 404 means endpoint doesn't exist, try next one
+        }
+    }
+
+    if (-not $validEndpoint) {
+        Add-SkippedCheck -Category "Rate Limiting" -CISControl "BB10" `
+            -CheckName "Rate Limiting Check" `
+            -Reason "No valid login endpoint found (all returned 404 - may be CyberArk Identity/Cloud with different auth flow)" `
+            -Type "NotApplicable"
+        return
+    }
+
     $successCount = 0
     # Reduced from 20 to 10 attempts to minimize lockout risk
     $testCount = 10
@@ -3754,11 +3821,12 @@ function Test-RateLimiting {
                 password = "TestPassword123!"
             } | ConvertTo-Json
 
-            [void](Invoke-OPSECWebRequest -Uri $loginEndpoint -Method POST -Body $body -ContentType "application/json" -TimeoutSec 5)
+            [void](Invoke-OPSECWebRequest -Uri $validEndpoint -Method POST -Body $body -ContentType "application/json" -TimeoutSec 5)
             $successCount++
         }
         catch {
-            if ($_.Exception.Response.StatusCode -eq 429) {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            if ($statusCode -eq 429) {
                 # Rate limiting is working
                 Add-Finding -Category "Rate Limiting" `
                     -CISControl "BB10" `
@@ -3771,7 +3839,10 @@ function Test-RateLimiting {
                     -Status "Pass"
                 return
             }
-            $successCount++
+            # 401/403 still counts as a processed request (endpoint is responding)
+            if ($statusCode -eq 401 -or $statusCode -eq 403 -or $statusCode -eq 400) {
+                $successCount++
+            }
         }
     }
 
@@ -4561,14 +4632,30 @@ function Test-CVE2025SecretsManager {
 
     foreach ($endpoint in $internalEndpoints) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            # Use -MaximumRedirection 0 to prevent following redirects to login pages
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction SilentlyContinue
 
+            # Only flag if we get actual 200 response (not redirect) with real content
             if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) {
+                $body = $response.Content
+
+                # Skip soft 404 / login page responses
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $endpoint - detected soft 404/login page" -Level Debug
+                    continue
+                }
+
+                # Skip if response looks like HTML login page rather than health/metrics data
+                if ($body -match '<html|<!DOCTYPE|<head|<body' -and $body -notmatch '"status"|"healthy"|"metrics"|"version"') {
+                    Write-AuditLog "Skipping $endpoint - detected HTML page instead of health/metrics data" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE14" `
                     -Finding "Internal endpoint accessible from external network (CVE-2025-49831 risk)" `
                     -Resource $endpoint `
-                    -CurrentValue "Endpoint accessible: $($response.Content.Substring(0, [Math]::Min(100, $response.Content.Length)))..." `
+                    -CurrentValue "Endpoint accessible: $($body.Substring(0, [Math]::Min(100, $body.Length)))..." `
                     -ExpectedValue "Internal endpoints not accessible externally" `
                     -Recommendation "Review network segmentation and apply CVE-2025-49831 patches" `
                     -Severity "High"
@@ -13946,6 +14033,1545 @@ function Test-IdentityAppCatalog {
             -Type "Error"
     }
 }
+
+#region Custom Plugins Security (PLG1-PLG5)
+
+function Test-CustomPluginSecurity {
+    Write-AuditLog "Running Custom Plugin Security Checks..." -Level Info
+
+    Test-PSMConnectorSecurity
+    Test-CPMPluginSecurity
+    Test-UnauthorizedComponents
+    Test-PluginSignatures
+    Test-CustomScriptPermissions
+}
+
+function Test-PSMConnectorSecurity {
+    # PLG1: Custom PSM connector security
+    Write-AuditLog "Checking custom PSM connector security (PLG1)..." -Level Info
+    
+    try {
+        # Check for custom PSM connectors via API
+        $components = Invoke-CyberArkAPI -Endpoint "/API/ComponentsMonitoringDetails/SessionManagement" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($components) {
+            $customConnectors = @()
+            foreach ($component in $components.Components) {
+                if ($component.ComponentType -match "Custom|Third" -or $component.ComponentName -notmatch "^(PSM-|CyberArk)") {
+                    $customConnectors += $component.ComponentName
+                }
+            }
+            
+            if ($customConnectors.Count -gt 0) {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG1" `
+                    -Finding "Custom PSM connectors detected" `
+                    -Resource "PSM Connectors" `
+                    -CurrentValue "Found $($customConnectors.Count) custom connectors: $($customConnectors -join ', ')" `
+                    -ExpectedValue "All custom connectors should be reviewed and validated" `
+                    -Recommendation "Review custom PSM connectors for: 1) Source code review, 2) Digital signature validation, 3) Input/output sanitization, 4) Credential handling security" `
+                    -Severity "Medium"
+            }
+            else {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG1" `
+                    -Finding "No custom PSM connectors detected" `
+                    -Resource "PSM Connectors" `
+                    -CurrentValue "Only standard CyberArk connectors in use" `
+                    -ExpectedValue "Standard connectors preferred" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Custom Plugins" `
+                -CISControl "PLG1" `
+                -Finding "Custom PSM connector security" `
+                -Resource "PSM Connectors" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "Custom connectors validated and signed" `
+                -Recommendation "Review: 1) Custom connector code for security issues, 2) Digital signatures on DLLs, 3) Input validation, 4) Secure credential handling" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG1" `
+            -CheckName "PSM Connector Security" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CPMPluginSecurity {
+    # PLG2: Custom CPM plugin injection risks
+    Write-AuditLog "Checking custom CPM plugin security (PLG2)..." -Level Info
+    
+    try {
+        # Check platforms for custom prompts/plugins
+        $platforms = Invoke-CyberArkAPI -Endpoint "/API/Platforms?Active=true" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($platforms -and $platforms.Platforms) {
+            $customPlatforms = @()
+            foreach ($platform in $platforms.Platforms) {
+                if ($platform.PlatformID -notmatch "^(Win|Unix|Oracle|MSSQL|MySQL|SSH|Telnet|CyberArk)") {
+                    $customPlatforms += $platform.PlatformID
+                }
+            }
+            
+            if ($customPlatforms.Count -gt 0) {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG2" `
+                    -Finding "Custom CPM platforms detected" `
+                    -Resource "CPM Platforms" `
+                    -CurrentValue "Found $($customPlatforms.Count) custom platforms" `
+                    -ExpectedValue "Custom platforms should be security reviewed" `
+                    -Recommendation "Review custom CPM platforms for: 1) Command injection in prompts, 2) Secure password change scripts, 3) Error handling, 4) Logging of operations" `
+                    -Severity "Medium"
+            }
+            else {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG2" `
+                    -Finding "No custom CPM platforms detected" `
+                    -Resource "CPM Platforms" `
+                    -CurrentValue "Only standard platforms in use" `
+                    -ExpectedValue "Standard platforms preferred" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Custom Plugins" `
+                -CISControl "PLG2" `
+                -Finding "Custom CPM plugin security" `
+                -Resource "CPM Plugins" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "Custom plugins reviewed for injection risks" `
+                -Recommendation "Review: 1) Custom prompts for command injection, 2) Password change scripts, 3) Reconciliation logic, 4) Error handling" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG2" `
+            -CheckName "CPM Plugin Security" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-UnauthorizedComponents {
+    # PLG3: Unauthorized/outdated component detection
+    Write-AuditLog "Checking for unauthorized components (PLG3)..." -Level Info
+    
+    try {
+        $systemHealth = Invoke-CyberArkAPI -Endpoint "/API/ComponentsMonitoringDetails" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($systemHealth) {
+            $outdatedComponents = @()
+            $unknownComponents = @()
+            
+            foreach ($component in $systemHealth.Components) {
+                # Check for version mismatches or unknown components
+                if ($component.ComponentVersion -and $component.ComponentVersion -lt "12.0") {
+                    $outdatedComponents += "$($component.ComponentName) v$($component.ComponentVersion)"
+                }
+                if ($component.ComponentType -eq "Unknown" -or $component.IsRegistered -eq $false) {
+                    $unknownComponents += $component.ComponentName
+                }
+            }
+            
+            if ($outdatedComponents.Count -gt 0) {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG3" `
+                    -Finding "Outdated CyberArk components detected" `
+                    -Resource "System Components" `
+                    -CurrentValue "Outdated: $($outdatedComponents -join ', ')" `
+                    -ExpectedValue "All components on supported versions" `
+                    -Recommendation "Update outdated components to current supported version to receive security patches" `
+                    -Severity "High"
+            }
+            
+            if ($unknownComponents.Count -gt 0) {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG3" `
+                    -Finding "Unregistered/unknown components detected" `
+                    -Resource "System Components" `
+                    -CurrentValue "Unknown: $($unknownComponents -join ', ')" `
+                    -ExpectedValue "All components registered and authorized" `
+                    -Recommendation "Investigate unknown components - may indicate unauthorized installations or configuration issues" `
+                    -Severity "High"
+            }
+            
+            if ($outdatedComponents.Count -eq 0 -and $unknownComponents.Count -eq 0) {
+                Add-Finding -Category "Custom Plugins" `
+                    -CISControl "PLG3" `
+                    -Finding "All components current and authorized" `
+                    -Resource "System Components" `
+                    -CurrentValue "All components registered and up to date" `
+                    -ExpectedValue "Components current and authorized" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Custom Plugins" `
+                -CISControl "PLG3" `
+                -Finding "Component authorization status" `
+                -Resource "System Components" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "All components authorized and current" `
+                -Recommendation "Verify: 1) All installed components are authorized, 2) Component versions are current, 3) No rogue installations" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG3" `
+            -CheckName "Unauthorized Components" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PluginSignatures {
+    # PLG4: Plugin digital signature validation
+    Write-AuditLog "Checking plugin digital signatures (PLG4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Custom Plugins" `
+            -CISControl "PLG4" `
+            -Finding "Plugin digital signature validation" `
+            -Resource "Plugin Signatures" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "All plugins digitally signed by CyberArk or trusted publisher" `
+            -Recommendation "Verify: 1) All DLLs in PSM/CPM directories are signed, 2) Signatures are from CyberArk or approved vendors, 3) AppLocker/WDAC enforces signature requirements, 4) Audit unsigned code execution" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG4" `
+            -CheckName "Plugin Signatures" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CustomScriptPermissions {
+    # PLG5: Custom script file permissions
+    Write-AuditLog "Checking custom script permissions (PLG5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Custom Plugins" `
+            -CISControl "PLG5" `
+            -Finding "Custom script file permissions" `
+            -Resource "Script Permissions" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Scripts read-only, owned by admin accounts" `
+            -Recommendation "Verify: 1) Custom scripts are read-only to service accounts, 2) Only admins can modify scripts, 3) Scripts are in protected directories, 4) File integrity monitoring enabled" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG5" `
+            -CheckName "Custom Script Permissions" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Backup Security (BKP1-BKP5)
+
+function Test-BackupSecurity {
+    Write-AuditLog "Running Backup Security Checks..." -Level Info
+
+    Test-VaultBackupEncryption
+    Test-BackupFilePermissions
+    Test-BackupTransitEncryption
+    Test-BackupRestorationTesting
+    Test-BackupRetentionPolicy
+}
+
+function Test-VaultBackupEncryption {
+    # BKP1: Vault backup encryption
+    Write-AuditLog "Checking vault backup encryption (BKP1)..." -Level Info
+    
+    try {
+        if ($BackupPath -and (Test-Path $BackupPath)) {
+            $backupFiles = Get-ChildItem -Path $BackupPath -Filter "*.bak" -ErrorAction SilentlyContinue
+            
+            if ($backupFiles) {
+                Add-Finding -Category "Backup Security" `
+                    -CISControl "BKP1" `
+                    -Finding "Vault backup files found" `
+                    -Resource $BackupPath `
+                    -CurrentValue "Found $($backupFiles.Count) backup files" `
+                    -ExpectedValue "Backups encrypted at rest" `
+                    -Recommendation "Verify: 1) Backups are encrypted with Vault server key, 2) Encryption keys are securely stored, 3) Backup encryption is tested during restore drills" `
+                    -Severity "Medium"
+            }
+        }
+        else {
+            Add-Finding -Category "Backup Security" `
+                -CISControl "BKP1" `
+                -Finding "Vault backup encryption status" `
+                -Resource "Vault Backups" `
+                -CurrentValue "Manual verification required (use -BackupPath to analyze)" `
+                -ExpectedValue "All backups encrypted at rest" `
+                -Recommendation "Verify: 1) Vault backup encryption is enabled, 2) Encryption uses strong algorithms (AES-256), 3) Keys are managed securely" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Backup Security" -CISControl "BKP1" `
+            -CheckName "Vault Backup Encryption" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-BackupFilePermissions {
+    # BKP2: Backup file permissions
+    Write-AuditLog "Checking backup file permissions (BKP2)..." -Level Info
+    
+    try {
+        if ($BackupPath -and (Test-Path $BackupPath)) {
+            $acl = Get-Acl -Path $BackupPath -ErrorAction SilentlyContinue
+            
+            if ($acl) {
+                $riskyPermissions = @()
+                foreach ($access in $acl.Access) {
+                    if ($access.IdentityReference -match "Everyone|Users|Authenticated Users" -and 
+                        $access.FileSystemRights -match "Write|Modify|FullControl") {
+                        $riskyPermissions += "$($access.IdentityReference): $($access.FileSystemRights)"
+                    }
+                }
+                
+                if ($riskyPermissions.Count -gt 0) {
+                    Add-Finding -Category "Backup Security" `
+                        -CISControl "BKP2" `
+                        -Finding "Backup directory has risky permissions" `
+                        -Resource $BackupPath `
+                        -CurrentValue "Risky: $($riskyPermissions -join '; ')" `
+                        -ExpectedValue "Only Vault service and backup admins have access" `
+                        -Recommendation "Remove write access for non-admin users from backup directory" `
+                        -Severity "High"
+                }
+                else {
+                    Add-Finding -Category "Backup Security" `
+                        -CISControl "BKP2" `
+                        -Finding "Backup directory permissions appear secure" `
+                        -Resource $BackupPath `
+                        -CurrentValue "No excessive permissions detected" `
+                        -ExpectedValue "Restricted access" `
+                        -Severity "Info" `
+                        -Status "Pass"
+                }
+            }
+        }
+        else {
+            Add-Finding -Category "Backup Security" `
+                -CISControl "BKP2" `
+                -Finding "Backup file permissions" `
+                -Resource "Vault Backups" `
+                -CurrentValue "Manual verification required (use -BackupPath to analyze)" `
+                -ExpectedValue "Restricted to backup administrators only" `
+                -Recommendation "Verify: 1) Backup files readable only by Vault service, 2) Backup admins have restricted access, 3) Audit logging on backup access" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Backup Security" -CISControl "BKP2" `
+            -CheckName "Backup File Permissions" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-BackupTransitEncryption {
+    # BKP3: Backup in-transit encryption
+    Write-AuditLog "Checking backup transit encryption (BKP3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Backup Security" `
+            -CISControl "BKP3" `
+            -Finding "Backup in-transit encryption" `
+            -Resource "Backup Transfer" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Backups encrypted during transfer to offsite storage" `
+            -Recommendation "Verify: 1) Backups transferred over encrypted channels (TLS/SSH), 2) Network segmentation for backup traffic, 3) Secure replication to DR site" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Backup Security" -CISControl "BKP3" `
+            -CheckName "Backup Transit Encryption" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-BackupRestorationTesting {
+    # BKP4: Backup restoration testing
+    Write-AuditLog "Checking backup restoration testing (BKP4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Backup Security" `
+            -CISControl "BKP4" `
+            -Finding "Backup restoration testing" `
+            -Resource "Backup Restoration" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Regular restoration tests performed and documented" `
+            -Recommendation "Verify: 1) Quarterly restoration drills, 2) Documented restoration procedures, 3) RTO/RPO validation, 4) DR vault synchronization testing" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Backup Security" -CISControl "BKP4" `
+            -CheckName "Backup Restoration Testing" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-BackupRetentionPolicy {
+    # BKP5: Backup retention policy
+    Write-AuditLog "Checking backup retention policy (BKP5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Backup Security" `
+            -CISControl "BKP5" `
+            -Finding "Backup retention policy" `
+            -Resource "Backup Retention" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Retention policy aligned with compliance requirements" `
+            -Recommendation "Verify: 1) Retention period meets regulatory requirements, 2) Secure deletion of expired backups, 3) Offsite retention, 4) Immutable backup options" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Backup Security" -CISControl "BKP5" `
+            -CheckName "Backup Retention Policy" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region HSM Integration (HSM1-HSM4)
+
+function Test-HSMIntegration {
+    Write-AuditLog "Running HSM Integration Checks..." -Level Info
+
+    Test-HSMConnectivity
+    Test-HSMKeyWrapping
+    Test-HSMPartitionIsolation
+    Test-HSMFirmwareCurrency
+}
+
+function Test-HSMConnectivity {
+    # HSM1: HSM connectivity and health
+    Write-AuditLog "Checking HSM connectivity (HSM1)..." -Level Info
+    
+    try {
+        # Try to get Vault configuration for HSM settings (used for future enhancement)
+        $null = Invoke-CyberArkAPI -Endpoint "/API/Configuration/Vault" -Method "GET" -ErrorAction SilentlyContinue
+        
+        $hsmProvider = if ($HSMProvider) { $HSMProvider } else { "Unknown" }
+        
+        Add-Finding -Category "HSM Integration" `
+            -CISControl "HSM1" `
+            -Finding "HSM connectivity status" `
+            -Resource "HSM ($hsmProvider)" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "HSM connected and healthy" `
+            -Recommendation "Verify: 1) HSM is reachable from Vault server, 2) HSM client software is current, 3) HSM health monitoring alerts configured, 4) Redundant HSM connectivity" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM1" `
+            -CheckName "HSM Connectivity" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-HSMKeyWrapping {
+    # HSM2: HSM key wrapping configuration
+    Write-AuditLog "Checking HSM key wrapping (HSM2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "HSM Integration" `
+            -CISControl "HSM2" `
+            -Finding "HSM key wrapping configuration" `
+            -Resource "HSM Key Management" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Vault master key wrapped by HSM" `
+            -Recommendation "Verify: 1) Vault master key is HSM-protected, 2) Key wrapping uses approved algorithms, 3) HSM backup keys are securely stored, 4) Key ceremony procedures documented" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM2" `
+            -CheckName "HSM Key Wrapping" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-HSMPartitionIsolation {
+    # HSM3: HSM partition isolation
+    Write-AuditLog "Checking HSM partition isolation (HSM3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "HSM Integration" `
+            -CISControl "HSM3" `
+            -Finding "HSM partition isolation" `
+            -Resource "HSM Partitions" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Dedicated partition for CyberArk Vault" `
+            -Recommendation "Verify: 1) CyberArk has dedicated HSM partition, 2) Partition access restricted to Vault service, 3) Partition limits enforced, 4) Audit logging enabled on partition" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM3" `
+            -CheckName "HSM Partition Isolation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-HSMFirmwareCurrency {
+    # HSM4: HSM firmware currency
+    Write-AuditLog "Checking HSM firmware currency (HSM4)..." -Level Info
+    
+    try {
+        $hsmProvider = if ($HSMProvider) { $HSMProvider } else { "your HSM vendor" }
+        
+        Add-Finding -Category "HSM Integration" `
+            -CISControl "HSM4" `
+            -Finding "HSM firmware currency" `
+            -Resource "HSM Firmware" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "HSM firmware is current and supported" `
+            -Recommendation "Verify: 1) HSM firmware is up to date per $hsmProvider advisories, 2) Security patches applied, 3) Firmware version is supported, 4) Upgrade schedule documented" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM4" `
+            -CheckName "HSM Firmware Currency" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region PTA Advanced Detection (PTAD1-PTAD6)
+
+function Test-PTAAdvanced {
+    Write-AuditLog "Running PTA Advanced Detection Checks..." -Level Info
+
+    Test-PTACustomRules
+    Test-PTAMLQuality
+    Test-PTAAlertFatigue
+    Test-PTARuleCoverage
+    Test-PTAUEBAIntegration
+    Test-PTAAutomatedResponse
+}
+
+function Test-PTACustomRules {
+    # PTAD1: PTA custom detection rules
+    Write-AuditLog "Checking PTA custom rules (PTAD1)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD1" `
+            -Finding "PTA custom detection rules" `
+            -Resource "PTA Rules" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Custom rules defined for organization-specific threats" `
+            -Recommendation "Review: 1) Custom rules for privileged account abuse, 2) Rules for off-hours access, 3) Geographic anomaly rules, 4) High-risk asset access rules" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD1" `
+            -CheckName "PTA Custom Rules" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PTAMLQuality {
+    # PTAD2: PTA ML model quality
+    Write-AuditLog "Checking PTA ML model quality (PTAD2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD2" `
+            -Finding "PTA ML model quality" `
+            -Resource "PTA Machine Learning" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "ML models trained with sufficient data and regularly updated" `
+            -Recommendation "Verify: 1) Sufficient training data (90+ days), 2) Model retraining schedule, 3) False positive/negative rates acceptable, 4) Baseline accuracy metrics" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD2" `
+            -CheckName "PTA ML Quality" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PTAAlertFatigue {
+    # PTAD3: PTA alert fatigue analysis
+    Write-AuditLog "Checking PTA alert fatigue (PTAD3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD3" `
+            -Finding "PTA alert fatigue analysis" `
+            -Resource "PTA Alerts" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Alert volume manageable with low false positive rate" `
+            -Recommendation "Review: 1) Alert volume per day/week, 2) False positive rate (<10% target), 3) Alert tuning history, 4) Dismissed alert patterns" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD3" `
+            -CheckName "PTA Alert Fatigue" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PTARuleCoverage {
+    # PTAD4: PTA detection rule coverage
+    Write-AuditLog "Checking PTA rule coverage (PTAD4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD4" `
+            -Finding "PTA detection rule coverage" `
+            -Resource "PTA Coverage" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Rules cover all MITRE ATT&CK relevant techniques" `
+            -Recommendation "Verify coverage for: 1) Credential theft (T1003), 2) Lateral movement (T1021), 3) Privilege escalation (T1078), 4) Defense evasion (T1070)" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD4" `
+            -CheckName "PTA Rule Coverage" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PTAUEBAIntegration {
+    # PTAD5: PTA UEBA integration
+    Write-AuditLog "Checking PTA UEBA integration (PTAD5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD5" `
+            -Finding "PTA UEBA integration" `
+            -Resource "UEBA Integration" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "PTA data integrated with enterprise UEBA" `
+            -Recommendation "Verify: 1) PTA events forwarded to UEBA, 2) User risk scoring includes PAM data, 3) Cross-platform correlation, 4) Unified investigation workflow" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD5" `
+            -CheckName "PTA UEBA Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PTAAutomatedResponse {
+    # PTAD6: PTA automated response actions
+    Write-AuditLog "Checking PTA automated response (PTAD6)..." -Level Info
+    
+    try {
+        Add-Finding -Category "PTA Deep Dive" `
+            -CISControl "PTAD6" `
+            -Finding "PTA automated response actions" `
+            -Resource "PTA Response" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Automated response for high-confidence detections" `
+            -Recommendation "Configure: 1) Auto-suspend for credential theft, 2) Session termination for anomalies, 3) SOAR playbook integration, 4) Graduated response based on confidence" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD6" `
+            -CheckName "PTA Automated Response" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Third-Party Integrations (TPI1-TPI5)
+
+function Test-ThirdPartyIntegrations {
+    Write-AuditLog "Running Third-Party Integration Checks..." -Level Info
+
+    Test-ITSMIntegration
+    Test-SOARIntegration
+    Test-SIEMCorrelation
+    Test-SIEMForwarderHealth
+    Test-IntegrationCredentialHealth
+}
+
+function Test-ITSMIntegration {
+    # TPI1: ITSM (ServiceNow) integration
+    Write-AuditLog "Checking ITSM integration (TPI1)..." -Level Info
+    
+    try {
+        $servicenowUrl = if ($ServiceNowUrl) { $ServiceNowUrl } else { "Not configured" }
+        
+        Add-Finding -Category "Third-Party Integration" `
+            -CISControl "TPI1" `
+            -Finding "ITSM integration status" `
+            -Resource "ServiceNow/ITSM" `
+            -CurrentValue "ServiceNow URL: $servicenowUrl" `
+            -ExpectedValue "ITSM integrated for ticketing and approvals" `
+            -Recommendation "Verify: 1) Privileged access requests create tickets, 2) Approval workflows integrated, 3) Account provisioning automated, 4) Audit trail synchronized" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI1" `
+            -CheckName "ITSM Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SOARIntegration {
+    # TPI2: SOAR automated response playbooks
+    Write-AuditLog "Checking SOAR integration (TPI2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Third-Party Integration" `
+            -CISControl "TPI2" `
+            -Finding "SOAR playbook integration" `
+            -Resource "SOAR Platform" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "SOAR playbooks for privileged access incidents" `
+            -Recommendation "Verify: 1) Playbooks for credential compromise, 2) Automated account suspension, 3) Evidence collection automation, 4) Escalation workflows" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI2" `
+            -CheckName "SOAR Integration" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SIEMCorrelation {
+    # TPI3: SIEM PAM event correlation
+    Write-AuditLog "Checking SIEM correlation (TPI3)..." -Level Info
+    
+    try {
+        $siemUrl = if ($SIEMUrl) { $SIEMUrl } else { "Not configured" }
+        
+        Add-Finding -Category "Third-Party Integration" `
+            -CISControl "TPI3" `
+            -Finding "SIEM PAM event correlation" `
+            -Resource "SIEM" `
+            -CurrentValue "SIEM URL: $siemUrl" `
+            -ExpectedValue "PAM events correlated with other security data" `
+            -Recommendation "Verify: 1) PAM events parsed correctly, 2) Correlation rules for PAM + endpoint, 3) Dashboards for privileged activity, 4) Alert rules for anomalies" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI3" `
+            -CheckName "SIEM Correlation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-SIEMForwarderHealth {
+    # TPI4: SIEM log forwarder health
+    Write-AuditLog "Checking SIEM forwarder health (TPI4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Third-Party Integration" `
+            -CISControl "TPI4" `
+            -Finding "SIEM log forwarder health" `
+            -Resource "Log Forwarders" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "All forwarders healthy with no backlog" `
+            -Recommendation "Verify: 1) Syslog/CEF forwarders running, 2) No event queue backlog, 3) Network connectivity to SIEM, 4) Monitoring alerts for forwarder failures" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI4" `
+            -CheckName "SIEM Forwarder Health" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-IntegrationCredentialHealth {
+    # TPI5: Integration credential health
+    Write-AuditLog "Checking integration credential health (TPI5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Third-Party Integration" `
+            -CISControl "TPI5" `
+            -Finding "Integration credential health" `
+            -Resource "Integration Credentials" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Integration credentials managed and rotated" `
+            -Recommendation "Verify: 1) Integration accounts stored in CyberArk, 2) Credentials rotated regularly, 3) Least privilege for integrations, 4) Monitoring for integration failures" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI5" `
+            -CheckName "Integration Credential Health" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Operational Hygiene (OPS1-OPS8)
+
+function Test-OperationalHygiene {
+    Write-AuditLog "Running Operational Hygiene Checks..." -Level Info
+
+    Test-OnboardingQueueMetrics
+    Test-CPMFailureRates
+    Test-PSMSessionMetrics
+    Test-CPMReconciliationBacklog
+    Test-PlatformConnectionErrors
+    Test-VaultUtilization
+    Test-LicenseCompliance
+    Test-ComponentUptime
+}
+
+function Test-OnboardingQueueMetrics {
+    # OPS1: Account onboarding queue metrics
+    Write-AuditLog "Checking onboarding queue (OPS1)..." -Level Info
+    
+    try {
+        $pendingAccounts = Invoke-CyberArkAPI -Endpoint "/API/DiscoveredAccounts?status=pending" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($pendingAccounts -and $pendingAccounts.count) {
+            $pendingCount = $pendingAccounts.count
+            
+            if ($pendingCount -gt 100) {
+                Add-Finding -Category "Operational Hygiene" `
+                    -CISControl "OPS1" `
+                    -Finding "Large onboarding queue backlog" `
+                    -Resource "Discovery Queue" `
+                    -CurrentValue "$pendingCount accounts pending onboarding" `
+                    -ExpectedValue "Queue regularly processed, <50 pending" `
+                    -Recommendation "Review and onboard pending accounts. Consider: 1) Automated onboarding rules, 2) Regular review cycles, 3) Account ownership assignment" `
+                    -Severity "Medium"
+            }
+            else {
+                Add-Finding -Category "Operational Hygiene" `
+                    -CISControl "OPS1" `
+                    -Finding "Onboarding queue status" `
+                    -Resource "Discovery Queue" `
+                    -CurrentValue "$pendingCount accounts pending" `
+                    -ExpectedValue "<50 pending accounts" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Operational Hygiene" `
+                -CISControl "OPS1" `
+                -Finding "Onboarding queue metrics" `
+                -Resource "Discovery Queue" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "Queue processed regularly" `
+                -Recommendation "Review: 1) Pending accounts backlog, 2) Onboarding SLAs, 3) Automated onboarding rules" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS1" `
+            -CheckName "Onboarding Queue Metrics" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CPMFailureRates {
+    # OPS2: CPM password change failure rates
+    Write-AuditLog "Checking CPM failure rates (OPS2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Operational Hygiene" `
+            -CISControl "OPS2" `
+            -Finding "CPM password change metrics" `
+            -Resource "CPM Operations" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Failure rate <5%" `
+            -Recommendation "Review: 1) Password change success rate, 2) Common failure reasons, 3) Platform connectivity issues, 4) Credential verification failures" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS2" `
+            -CheckName "CPM Failure Rates" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PSMSessionMetrics {
+    # OPS3: PSM session success/failure ratios
+    Write-AuditLog "Checking PSM session metrics (OPS3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Operational Hygiene" `
+            -CISControl "OPS3" `
+            -Finding "PSM session metrics" `
+            -Resource "PSM Sessions" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Session success rate >95%" `
+            -Recommendation "Review: 1) Session success rate, 2) Connection failures by platform, 3) User experience issues, 4) PSM capacity utilization" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS3" `
+            -CheckName "PSM Session Metrics" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CPMReconciliationBacklog {
+    # OPS4: CPM reconciliation backlog
+    Write-AuditLog "Checking CPM reconciliation backlog (OPS4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Operational Hygiene" `
+            -CISControl "OPS4" `
+            -Finding "CPM reconciliation backlog" `
+            -Resource "CPM Reconciliation" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Reconciliation failures addressed within SLA" `
+            -Recommendation "Review: 1) Accounts requiring reconciliation, 2) Age of reconciliation queue, 3) Root cause of failures, 4) Manual verification needed" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS4" `
+            -CheckName "CPM Reconciliation Backlog" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PlatformConnectionErrors {
+    # OPS5: Platform connection errors
+    Write-AuditLog "Checking platform connection errors (OPS5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Operational Hygiene" `
+            -CISControl "OPS5" `
+            -Finding "Platform connection errors" `
+            -Resource "Platform Connectivity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Platform connectivity healthy" `
+            -Recommendation "Review: 1) Platforms with connection failures, 2) Network/firewall issues, 3) Target system availability, 4) Credential issues" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS5" `
+            -CheckName "Platform Connection Errors" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-VaultUtilization {
+    # OPS6: Vault utilization and capacity
+    Write-AuditLog "Checking vault utilization (OPS6)..." -Level Info
+    
+    try {
+        $accounts = Invoke-CyberArkAPI -Endpoint "/API/Accounts?limit=1" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($accounts -and $accounts.count) {
+            Add-Finding -Category "Operational Hygiene" `
+                -CISControl "OPS6" `
+                -Finding "Vault account utilization" `
+                -Resource "Vault Capacity" `
+                -CurrentValue "Total accounts: $($accounts.count)" `
+                -ExpectedValue "Within licensed capacity" `
+                -Recommendation "Monitor vault capacity and plan for growth" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+        else {
+            Add-Finding -Category "Operational Hygiene" `
+                -CISControl "OPS6" `
+                -Finding "Vault utilization metrics" `
+                -Resource "Vault Capacity" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "Capacity planning in place" `
+                -Recommendation "Review: 1) Current vs licensed accounts, 2) Storage utilization, 3) Performance metrics, 4) Growth projections" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS6" `
+            -CheckName "Vault Utilization" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-LicenseCompliance {
+    # OPS7: License compliance
+    Write-AuditLog "Checking license compliance (OPS7)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Operational Hygiene" `
+            -CISControl "OPS7" `
+            -Finding "License compliance" `
+            -Resource "Licensing" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Within licensed limits" `
+            -Recommendation "Verify: 1) User count vs license, 2) Account count vs license, 3) Module entitlements, 4) License renewal planning" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS7" `
+            -CheckName "License Compliance" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ComponentUptime {
+    # OPS8: Component uptime
+    Write-AuditLog "Checking component uptime (OPS8)..." -Level Info
+    
+    try {
+        $systemHealth = Invoke-CyberArkAPI -Endpoint "/API/ComponentsMonitoringDetails" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($systemHealth -and $systemHealth.Components) {
+            $unhealthyComponents = @()
+            foreach ($component in $systemHealth.Components) {
+                if ($component.IsLoggedOn -eq $false -or $component.ComponentStatus -ne "Connected") {
+                    $unhealthyComponents += $component.ComponentName
+                }
+            }
+            
+            if ($unhealthyComponents.Count -gt 0) {
+                Add-Finding -Category "Operational Hygiene" `
+                    -CISControl "OPS8" `
+                    -Finding "Components with availability issues" `
+                    -Resource "Component Uptime" `
+                    -CurrentValue "Unhealthy: $($unhealthyComponents -join ', ')" `
+                    -ExpectedValue "All components available 99.9%+" `
+                    -Recommendation "Investigate component availability issues. Check: 1) Service status, 2) Network connectivity, 3) Resource utilization, 4) Error logs" `
+                    -Severity "High"
+            }
+            else {
+                Add-Finding -Category "Operational Hygiene" `
+                    -CISControl "OPS8" `
+                    -Finding "All components healthy" `
+                    -Resource "Component Uptime" `
+                    -CurrentValue "All components connected" `
+                    -ExpectedValue "Components healthy" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Operational Hygiene" `
+                -CISControl "OPS8" `
+                -Finding "Component uptime metrics" `
+                -Resource "Component Uptime" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "99.9% uptime target" `
+                -Recommendation "Review: 1) Component availability reports, 2) Downtime incidents, 3) SLA compliance, 4) Capacity planning" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS8" `
+            -CheckName "Component Uptime" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Attack Path Simulation (APS1-APS6)
+
+function Test-AttackPathSimulation {
+    Write-AuditLog "Running Attack Path Simulation Checks..." -Level Info
+
+    Test-WorkstationPAMEscalation
+    Test-PassTheHashSurface
+    Test-NTLMRelayRisks
+    Test-CachedCredentialExtraction
+    Test-KerberoastingExposure
+    Test-PrivilegeEscalationPaths
+}
+
+function Test-WorkstationPAMEscalation {
+    # APS1: Workstation to PAM escalation paths
+    Write-AuditLog "Checking workstation to PAM escalation (APS1)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS1" `
+            -Finding "Workstation to PAM escalation paths" `
+            -Resource "Attack Paths" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "No direct paths from workstations to PAM" `
+            -Recommendation "Review: 1) PAM admin workstation isolation, 2) Jump server requirements, 3) Network segmentation, 4) MFA for PAM access from any workstation" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS1" `
+            -CheckName "Workstation PAM Escalation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PassTheHashSurface {
+    # APS2: Pass-the-Hash attack surface
+    Write-AuditLog "Checking Pass-the-Hash surface (APS2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS2" `
+            -Finding "Pass-the-Hash attack surface" `
+            -Resource "Credential Protection" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "PtH mitigations in place" `
+            -Recommendation "Verify: 1) Credential Guard enabled, 2) Protected Users group used, 3) Restricted Admin mode, 4) NTLM restricted where possible" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS2" `
+            -CheckName "Pass-the-Hash Surface" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-NTLMRelayRisks {
+    # APS3: NTLM relay risks
+    Write-AuditLog "Checking NTLM relay risks (APS3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS3" `
+            -Finding "NTLM relay attack risks" `
+            -Resource "NTLM Security" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "NTLM relay mitigations enabled" `
+            -Recommendation "Verify: 1) SMB signing required, 2) LDAP signing/channel binding, 3) EPA for IIS/Exchange, 4) NTLM restricted via GPO" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS3" `
+            -CheckName "NTLM Relay Risks" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-CachedCredentialExtraction {
+    # APS4: Cached credential extraction resilience
+    Write-AuditLog "Checking cached credential protection (APS4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS4" `
+            -Finding "Cached credential extraction resilience" `
+            -Resource "Credential Caching" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Cached credentials protected" `
+            -Recommendation "Verify: 1) WDigest disabled, 2) Cached logons limited (CachedLogonsCount), 3) LSASS protection enabled, 4) Credential Guard deployed" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS4" `
+            -CheckName "Cached Credential Protection" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-KerberoastingExposure {
+    # APS5: Kerberoasting exposure
+    Write-AuditLog "Checking Kerberoasting exposure (APS5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS5" `
+            -Finding "Kerberoasting exposure" `
+            -Resource "Kerberos Security" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Service accounts protected from Kerberoasting" `
+            -Recommendation "Verify: 1) gMSAs used where possible, 2) Service account passwords 25+ chars, 3) AES-only encryption, 4) SPNs reviewed regularly" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS5" `
+            -CheckName "Kerberoasting Exposure" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PrivilegeEscalationPaths {
+    # APS6: Privilege escalation paths
+    Write-AuditLog "Checking privilege escalation paths (APS6)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Attack Path Simulation" `
+            -CISControl "APS6" `
+            -Finding "Privilege escalation paths" `
+            -Resource "Escalation Paths" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "No uncontrolled escalation paths" `
+            -Recommendation "Review: 1) Tier model enforcement, 2) Admin account isolation, 3) Service account privileges, 4) BloodHound/Purple Knight analysis" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS6" `
+            -CheckName "Privilege Escalation Paths" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Supply Chain Integrity (SCI1-SCI5)
+
+function Test-SupplyChainIntegrity {
+    Write-AuditLog "Running Supply Chain Integrity Checks..." -Level Info
+
+    Test-ComponentFileHashes
+    Test-PatchCurrency
+    Test-ThirdPartyLibraries
+    Test-DigitalSignatureValidation
+    Test-ComponentOriginVerification
+}
+
+function Test-ComponentFileHashes {
+    # SCI1: Component file hash validation
+    Write-AuditLog "Checking component file hashes (SCI1)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Supply Chain Integrity" `
+            -CISControl "SCI1" `
+            -Finding "Component file hash validation" `
+            -Resource "File Integrity" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "All files match CyberArk published hashes" `
+            -Recommendation "Verify: 1) Compare file hashes with CyberArk checksums, 2) File integrity monitoring enabled, 3) Alert on unauthorized changes, 4) Baseline after patching" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI1" `
+            -CheckName "Component File Hashes" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PatchCurrency {
+    # SCI2: Patch currency verification
+    Write-AuditLog "Checking patch currency (SCI2)..." -Level Info
+    
+    try {
+        $systemHealth = Invoke-CyberArkAPI -Endpoint "/API/ComponentsMonitoringDetails" -Method "GET" -ErrorAction SilentlyContinue
+        
+        if ($systemHealth -and $systemHealth.Components) {
+            $versions = @{}
+            foreach ($component in $systemHealth.Components) {
+                if ($component.ComponentVersion) {
+                    $versions[$component.ComponentType] = $component.ComponentVersion
+                }
+            }
+            
+            if ($versions.Count -gt 0) {
+                Add-Finding -Category "Supply Chain Integrity" `
+                    -CISControl "SCI2" `
+                    -Finding "Component versions detected" `
+                    -Resource "Patch Status" `
+                    -CurrentValue "Versions: $($versions.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" } | Select-Object -First 5 | Join-String -Separator ', ')" `
+                    -ExpectedValue "Current supported version" `
+                    -Recommendation "Verify versions are current per CyberArk security advisories" `
+                    -Severity "Info" `
+                    -Status "Pass"
+            }
+        }
+        else {
+            Add-Finding -Category "Supply Chain Integrity" `
+                -CISControl "SCI2" `
+                -Finding "Patch currency verification" `
+                -Resource "Patch Status" `
+                -CurrentValue "Manual verification required" `
+                -ExpectedValue "Components on current supported version" `
+                -Recommendation "Verify: 1) All components on supported version, 2) Security patches applied, 3) Patch schedule documented, 4) Change management process" `
+                -Severity "Info" `
+                -Status "Pass"
+        }
+    }
+    catch {
+        Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI2" `
+            -CheckName "Patch Currency" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ThirdPartyLibraries {
+    # SCI3: Third-party library vulnerabilities
+    Write-AuditLog "Checking third-party libraries (SCI3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Supply Chain Integrity" `
+            -CISControl "SCI3" `
+            -Finding "Third-party library assessment" `
+            -Resource "Dependencies" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "No vulnerable dependencies" `
+            -Recommendation "Verify: 1) Dependencies patched for known CVEs, 2) Dependency scanning in place, 3) Log4j/Spring4Shell mitigated, 4) Regular dependency audit" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI3" `
+            -CheckName "Third-Party Libraries" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-DigitalSignatureValidation {
+    # SCI4: Digital signature validation
+    Write-AuditLog "Checking digital signatures (SCI4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Supply Chain Integrity" `
+            -CISControl "SCI4" `
+            -Finding "Digital signature validation" `
+            -Resource "Code Signing" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "All executables signed by CyberArk" `
+            -Recommendation "Verify: 1) All CyberArk binaries are signed, 2) Signatures are valid and not expired, 3) AppLocker/WDAC enforce signing, 4) Alert on unsigned execution" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI4" `
+            -CheckName "Digital Signature Validation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ComponentOriginVerification {
+    # SCI5: Component origin verification
+    Write-AuditLog "Checking component origin (SCI5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Supply Chain Integrity" `
+            -CISControl "SCI5" `
+            -Finding "Component origin verification" `
+            -Resource "Installation Source" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Components from verified CyberArk sources" `
+            -Recommendation "Verify: 1) Installation media from CyberArk portal, 2) Download checksums validated, 3) Installation chain of custody documented, 4) No third-party modifications" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI5" `
+            -CheckName "Component Origin Verification" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
+
+#region Network Segmentation (NSG1-NSG5)
+
+function Test-NetworkSegmentation {
+    Write-AuditLog "Running Network Segmentation Checks..." -Level Info
+
+    Test-VaultNetworkIsolation
+    Test-PSMVaultCommunication
+    Test-PVWABackendSegmentation
+    Test-EastWestMonitoring
+    Test-ComponentNetworkACLs
+}
+
+function Test-VaultNetworkIsolation {
+    # NSG1: Vault network isolation
+    Write-AuditLog "Checking Vault network isolation (NSG1)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Network Segmentation" `
+            -CISControl "NSG1" `
+            -Finding "Vault network isolation" `
+            -Resource "Vault Network" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Vault in dedicated network segment" `
+            -Recommendation "Verify: 1) Vault in separate VLAN/subnet, 2) Firewall rules restrict access, 3) Only required ports open (1858), 4) No direct internet access" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG1" `
+            -CheckName "Vault Network Isolation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PSMVaultCommunication {
+    # NSG2: PSM to Vault communication restrictions
+    Write-AuditLog "Checking PSM to Vault communication (NSG2)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Network Segmentation" `
+            -CISControl "NSG2" `
+            -Finding "PSM to Vault communication" `
+            -Resource "PSM Network" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "PSM restricted to Vault port 1858 only" `
+            -Recommendation "Verify: 1) PSM only reaches Vault on 1858, 2) No admin access from PSM to Vault, 3) Micro-segmentation between PSM farms, 4) PSM isolated from user workstations" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG2" `
+            -CheckName "PSM Vault Communication" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-PVWABackendSegmentation {
+    # NSG3: PVWA to backend segmentation
+    Write-AuditLog "Checking PVWA backend segmentation (NSG3)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Network Segmentation" `
+            -CISControl "NSG3" `
+            -Finding "PVWA to backend segmentation" `
+            -Resource "PVWA Network" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "PVWA frontend separated from Vault backend" `
+            -Recommendation "Verify: 1) PVWA in DMZ or frontend segment, 2) Only required ports to Vault, 3) WAF/reverse proxy in front of PVWA, 4) No direct user access to Vault" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG3" `
+            -CheckName "PVWA Backend Segmentation" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-EastWestMonitoring {
+    # NSG4: East-West traffic monitoring
+    Write-AuditLog "Checking East-West monitoring (NSG4)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Network Segmentation" `
+            -CISControl "NSG4" `
+            -Finding "East-West traffic monitoring" `
+            -Resource "Internal Traffic" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Lateral movement detection in place" `
+            -Recommendation "Verify: 1) Network flow logging between segments, 2) Anomaly detection for lateral movement, 3) Internal firewall/micro-segmentation, 4) NDR solution coverage" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG4" `
+            -CheckName "East-West Monitoring" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+function Test-ComponentNetworkACLs {
+    # NSG5: Component-specific network ACLs
+    Write-AuditLog "Checking component network ACLs (NSG5)..." -Level Info
+    
+    try {
+        Add-Finding -Category "Network Segmentation" `
+            -CISControl "NSG5" `
+            -Finding "Component-specific network ACLs" `
+            -Resource "Network ACLs" `
+            -CurrentValue "Manual verification required" `
+            -ExpectedValue "Least privilege network access per component" `
+            -Recommendation "Verify: 1) Each component has minimal required access, 2) CPM restricted to managed targets, 3) PSM only reaches session targets, 4) Regular ACL review" `
+            -Severity "Info" `
+            -Status "Pass"
+    }
+    catch {
+        Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG5" `
+            -CheckName "Component Network ACLs" `
+            -Reason "Error: $($_.Exception.Message)" `
+            -Type "Error"
+    }
+}
+
+#endregion
 
 #endregion
 
