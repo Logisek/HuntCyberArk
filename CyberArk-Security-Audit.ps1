@@ -249,6 +249,9 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$SkipHardeningChecks,
 
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDefaultCredentialTests,
+
     # New v4.2 parameters - Red Team / Offensive Security Enhancements
     [Parameter(Mandatory = $false)]
     [Alias("Stealth")]
@@ -2914,6 +2917,134 @@ function Test-AccountGroups {
 # BLACKBOX / EXTERNAL SECURITY CHECKS
 #======================================================================
 
+# Helper function to detect "soft 404" responses that return HTTP 200 but indicate page not found
+function Test-IsSoft404Response {
+    param (
+        [string]$ResponseContent,
+        [int]$MinContentLength = 50
+    )
+
+    if ([string]::IsNullOrEmpty($ResponseContent)) {
+        return $true
+    }
+
+    # Check for very short responses that likely indicate no real content
+    if ($ResponseContent.Length -lt $MinContentLength) {
+        return $true
+    }
+
+    # Patterns that indicate a "soft 404" or error page despite HTTP 200 status
+    $soft404Patterns = @(
+        # Generic "not found" patterns
+        "couldn't find this page",
+        "could not find this page",
+        "page not found",
+        "page was not found",
+        "resource not found",
+        "404 - not found",
+        "404 error",
+        "the page you requested",
+        "does not exist",
+        "no longer available",
+        "check your url",
+        "go back to the previous page",
+        "this page doesn't exist",
+        "this page does not exist",
+        "requested page is not available",
+        "requested resource is not available",
+        "invalid request",
+        "bad request",
+        "not a valid request",
+        "unable to find",
+        "cannot be found",
+        "we couldn't find",
+        "we could not find",
+        "nothing here",
+        "page is unavailable",
+        "resource is unavailable",
+        "endpoint not found",
+        "service not found",
+        "api not found",
+        # CyberArk-specific error responses (API returns 200 but body indicates error/not found)
+        '"ErrorCode"',
+        '"ErrorMessage"',
+        "ITATS001E",
+        "ITATS002E",
+        "ITATS003E",
+        "ITATS004E",
+        "ITATS005E",
+        "ITATS006E",
+        "ITATS007E",
+        "ITATS",
+        "PASWS",
+        "CAWS",
+        "EPARH",
+        "EPVR",
+        '"Details":',
+        "The resource you are looking for has been removed",
+        "has been removed, had its name changed",
+        "Server Error in '/PasswordVault' Application",
+        "Runtime Error",
+        "An application error occurred",
+        "HTTP Error 404",
+        "HTTP Error 403",
+        "HTTP Error 401",
+        "HTTP Error 500",
+        "The resource cannot be found",
+        "Directory Listing Denied",
+        "Access is denied",
+        "You do not have permission",
+        "error.aspx",
+        "errorpage",
+        "_error",
+        # IIS/ASP.NET error page indicators
+        "asp.net_sessionid",
+        "X-AspNet-Version",
+        "X-Powered-By: ASP.NET",
+        "customErrors",
+        "yslowin",
+        # CyberArk Identity/Cloud login/auth page patterns (returned for non-existent endpoints)
+        "Authenticating to Active Directory",
+        "Cookie support is required",
+        "cookies disabled",
+        "please enable before continuing",
+        "Sign in to your account",
+        "Login to CyberArk",
+        "CyberArk Identity",
+        "idaptive-login",
+        "cyberark-login",
+        "id.cyberark.cloud",
+        "privilegecloud.cyberark.cloud",
+        # Generic SSO/OAuth redirect patterns
+        "redirect_uri=",
+        "SAMLRequest=",
+        "RelayState=",
+        "oauth2/authorize",
+        "openid-connect/auth",
+        "login?next=",
+        "login?returnUrl=",
+        "auth/realms/",
+        # Generic login page indicators
+        "Enter your credentials",
+        "type=""password""",
+        "type='password'",
+        "Enter your username",
+        "Enter your password",
+        "Log in to continue",
+        "Please log in",
+        "Please sign in",
+        "Authentication required"
+    )
+
+    foreach ($pattern in $soft404Patterns) {
+        if ($ResponseContent -imatch [regex]::Escape($pattern)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Test-ExposedEndpoints {
     Write-AuditLog "Checking for exposed/sensitive endpoints (Blackbox)..." -Level Info
 
@@ -2941,14 +3072,67 @@ function Test-ExposedEndpoints {
 
     foreach ($endpoint in $sensitiveEndpoints) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$($endpoint.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            # Use -SkipHttpErrorCheck (PowerShell 6+) to get all responses without exceptions
+            # This ensures we can properly check status codes for 404, 401, 403, etc.
+            $invokeParams = @{
+                Uri            = "$PVWA$($endpoint.Path)"
+                Method         = 'GET'
+                UseBasicParsing = $true
+                TimeoutSec     = 5
+                ErrorAction    = 'Stop'
+            }
 
-            if ($response.StatusCode -eq 200) {
+            # Add SkipHttpErrorCheck for PowerShell 6+ to properly handle 4xx/5xx responses
+            if ($PSVersionTable.PSVersion.Major -ge 6) {
+                $invokeParams['SkipHttpErrorCheck'] = $true
+            }
+
+            $response = Invoke-WebRequest @invokeParams
+
+            # Only consider it exposed if we get a successful response (not 4xx/5xx)
+            if ($null -eq $response) {
+                Write-AuditLog "Skipping $($endpoint.Path) - no response received" -Level Debug
+                continue
+            }
+
+            # Explicitly check for non-success status codes (4xx/5xx)
+            if ($response.StatusCode -ge 400) {
+                Write-AuditLog "Skipping $($endpoint.Path) - received HTTP $($response.StatusCode) (not accessible)" -Level Debug
+                continue
+            }
+
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                $body = $response.Content
+
+                # Check for soft 404 responses (pages that return 200 but indicate "not found")
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $($endpoint.Path) - detected soft 404 page" -Level Debug
+                    continue
+                }
+
+                # Check for JSON error responses (CyberArk API returns 200 with error JSON)
+                if ($body -match '^\s*\{' -and ($body -match '"ErrorCode"' -or $body -match '"ErrorMessage"' -or $body -match '"Details"')) {
+                    Write-AuditLog "Skipping $($endpoint.Path) - detected JSON error response" -Level Debug
+                    continue
+                }
+
+                # Check for empty or minimal JSON responses that indicate no real content
+                if ($body -match '^\s*\{\s*\}\s*$' -or $body -match '^\s*\[\s*\]\s*$') {
+                    Write-AuditLog "Skipping $($endpoint.Path) - empty JSON response" -Level Debug
+                    continue
+                }
+
+                # Check for HTML error pages that might have slipped through
+                if ($body -match '<title>.*(?:Error|Not Found|Denied|Unauthorized|Forbidden).*</title>') {
+                    Write-AuditLog "Skipping $($endpoint.Path) - detected error page via title" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "Exposed Endpoints" `
                     -CISControl "BB1" `
                     -Finding "Sensitive endpoint accessible without authentication" `
                     -Resource $endpoint.Path `
-                    -CurrentValue "HTTP 200 - Accessible" `
+                    -CurrentValue "HTTP 200 - Accessible (Content Length: $($body.Length) bytes)" `
                     -ExpectedValue "HTTP 401/403 or not found" `
                     -Recommendation "Restrict access to $($endpoint.Desc)" `
                     -Severity $endpoint.Severity
@@ -3359,21 +3543,26 @@ function Test-BackupAndConfigFiles {
             $response = Invoke-WebRequest -Uri "$PVWA$($file.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
-                # Check content length to ensure it's not an error page
-                if ($response.Content.Length -gt 0) {
-                    $severity = "High"
-                    if ($file.Path -match "\.(log|txt)$") { $severity = "Medium" }
-                    if ($file.Path -match "\.(bak|config|ini|xml)$") { $severity = "Critical" }
+                $body = $response.Content
 
-                    Add-Finding -Category "Exposed Files" `
-                        -CISControl "BB7" `
-                        -Finding "Sensitive file accessible" `
-                        -Resource $file.Path `
-                        -CurrentValue "$($file.Desc) - HTTP 200 ($($response.Content.Length) bytes)" `
-                        -ExpectedValue "File not accessible" `
-                        -Recommendation "Remove or restrict access to $($file.Desc)" `
-                        -Severity $severity
+                # Check for soft 404 responses (pages that return 200 but indicate "not found")
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $($file.Path) - detected soft 404 page" -Level Debug
+                    continue
                 }
+
+                $severity = "High"
+                if ($file.Path -match "\.(log|txt)$") { $severity = "Medium" }
+                if ($file.Path -match "\.(bak|config|ini|xml)$") { $severity = "Critical" }
+
+                Add-Finding -Category "Exposed Files" `
+                    -CISControl "BB7" `
+                    -Finding "Sensitive file accessible" `
+                    -Resource $file.Path `
+                    -CurrentValue "$($file.Desc) - HTTP 200 ($($body.Length) bytes)" `
+                    -ExpectedValue "File not accessible" `
+                    -Recommendation "Remove or restrict access to $($file.Desc)" `
+                    -Severity $severity
             }
         }
         catch {
@@ -3638,11 +3827,19 @@ function Test-KnownVulnerabilities {
             $response = Invoke-WebRequest -Uri "$PVWA$api" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Check for soft 404 responses
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $api - detected soft 404 page" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "Known Vulnerabilities" `
                     -CISControl "BB11" `
                     -Finding "Legacy API version accessible" `
                     -Resource $api `
-                    -CurrentValue "HTTP 200" `
+                    -CurrentValue "HTTP 200 ($($body.Length) bytes)" `
                     -ExpectedValue "Disabled or removed" `
                     -Recommendation "Disable legacy API endpoints" `
                     -Severity "Medium"
@@ -4430,11 +4627,19 @@ function Test-CA25Bulletins {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Check for soft 404 responses
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $endpoint - detected soft 404 page" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CA25-32" `
                     -Finding "CCP endpoint accessible without authentication (CA25-32 risk)" `
                     -Resource $endpoint `
-                    -CurrentValue "Endpoint responds to unauthenticated requests" `
+                    -CurrentValue "Endpoint responds to unauthenticated requests ($($body.Length) bytes)" `
                     -ExpectedValue "Proper authentication required" `
                     -Recommendation "Apply patches for CA25-32 and ensure CCP requires authentication" `
                     -Severity "High"
@@ -4455,11 +4660,19 @@ function Test-CA25Bulletins {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Check for soft 404 responses
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $endpoint - detected soft 404 page" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CA25-34" `
                     -Finding "HTML5 Gateway endpoint detected (CA25-34 - verify patched)" `
                     -Resource $endpoint `
-                    -CurrentValue "HTML5 Gateway accessible" `
+                    -CurrentValue "HTML5 Gateway accessible ($($body.Length) bytes)" `
                     -ExpectedValue "Patched version 14.6 or later" `
                     -Recommendation "Verify HTML5 Gateway is patched for CA25-34 DoS vulnerability" `
                     -Severity "Medium"
@@ -4537,11 +4750,19 @@ function Test-BOLA {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Check for soft 404 responses
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $endpoint - detected soft 404 page" -Level Debug
+                    continue
+                }
+
                 Add-Finding -Category "API Security" `
                     -CISControl "API3" `
                     -Finding "Potential BOLA/IDOR vulnerability" `
                     -Resource $endpoint `
-                    -CurrentValue "Resource accessible without authentication" `
+                    -CurrentValue "Resource accessible without authentication ($($body.Length) bytes)" `
                     -ExpectedValue "401/403 Unauthorized" `
                     -Recommendation "Implement proper authorization checks" `
                     -Severity "High"
@@ -4673,17 +4894,30 @@ function Test-APIVersioning {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$($api.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
-            if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 401) {
-                if ($api.Severity -ne "Info") {
-                    Add-Finding -Category "API Security" `
-                        -CISControl "API5" `
-                        -Finding "Legacy API version accessible" `
-                        -Resource $api.Path `
-                        -CurrentValue "$($api.Version) - Active" `
-                        -ExpectedValue "Only current API version" `
-                        -Recommendation "Disable legacy API endpoints" `
-                        -Severity $api.Severity
+            # 401 means endpoint exists but requires auth - this is a valid detection
+            # For 200 responses, check for soft 404 to avoid false positives
+            $isValidEndpoint = $false
+            if ($response.StatusCode -eq 401) {
+                $isValidEndpoint = $true
+            }
+            elseif ($response.StatusCode -eq 200) {
+                $body = $response.Content
+                if (-not (Test-IsSoft404Response -ResponseContent $body)) {
+                    $isValidEndpoint = $true
+                } else {
+                    Write-AuditLog "Skipping $($api.Path) - detected soft 404 page" -Level Debug
                 }
+            }
+
+            if ($isValidEndpoint -and $api.Severity -ne "Info") {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API5" `
+                    -Finding "Legacy API version accessible" `
+                    -Resource $api.Path `
+                    -CurrentValue "$($api.Version) - Active" `
+                    -ExpectedValue "Only current API version" `
+                    -Recommendation "Disable legacy API endpoints" `
+                    -Severity $api.Severity
             }
         }
         catch { }
@@ -15493,7 +15727,11 @@ function Start-Audit {
 
     try { Test-ExposedEndpoints } catch { Add-SkippedCheck -Category "Exposed Endpoints" -CISControl "BB1" -CheckName "Exposed Endpoints" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     try { Test-InformationDisclosure } catch { Add-SkippedCheck -Category "Information Disclosure" -CISControl "BB2" -CheckName "Information Disclosure" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-DefaultCredentials } catch { Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+    if (-not $SkipDefaultCredentialTests -and -not $script:SkipDefaultCredentialTests) {
+        try { Test-DefaultCredentials } catch { Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+    } else {
+        Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Skipped by user request (-SkipDefaultCredentialTests or -OPSECMode)" -Type "Skipped"
+    }
     try { Test-HTTPMethods } catch { Add-SkippedCheck -Category "HTTP Methods" -CISControl "BB4" -CheckName "HTTP Methods" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     try { Test-CookieSecurity } catch { Add-SkippedCheck -Category "Cookie Security" -CISControl "BB5" -CheckName "Cookie Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     try { Test-CORSConfiguration } catch { Add-SkippedCheck -Category "CORS Configuration" -CISControl "BB6" -CheckName "CORS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }

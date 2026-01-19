@@ -1006,6 +1006,7 @@ C:\SecurityReports\CyberArk\
 | SkipCloudChecks | No | False | Skip Cloud Security checks (CLD1-CLD6) |
 | SkipDRChecks | No | False | Skip Disaster Recovery checks (DR1-DR5) |
 | SkipHardeningChecks | No | False | Skip component hardening checks (HARD, VAULT, PSM, PVWA, CPM) |
+| SkipDefaultCredentialTests | No | False | Skip default/weak credential testing (BB3) |
 | SkipSecretsHubChecks | No | False | Skip Secrets Hub checks (SH1-SH6) |
 | SkipRemoteAccessChecks | No | False | Skip Remote Access/Alero checks (RA1-RA6) |
 | SkipK8sChecks | No | False | Skip Kubernetes checks (K8S1-K8S8) |
