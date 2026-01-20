@@ -1,0 +1,80 @@
+{
+  "_comment": "CyberArk Security Audit Configuration File",
+  "_description": "Customize thresholds below. Delete keys to use defaults. Use -ConfigFile parameter to load this file.",
+
+  "MinPasswordLength": 14,
+  "MaxPasswordAgeDays": 90,
+  "MinVersionRetention": 5,
+  "SessionTimeoutMinutes": 20,
+  "MaxFailedLogins": 5,
+  "MinTLSVersion": "1.2",
+
+  "MinValidityPeriod": 60,
+  "MaxExclusiveAccessDuration": 1440,
+  "MaxPendingAccountAgeDays": 30,
+  "MinReconcileFrequencyDays": 7,
+  "MaxInactiveAccountDays": 90,
+  "RequireDualControlForSensitive": true,
+  "PSMRecordingRequired": true,
+
+  "PageLimit": 1000,
+  "TimeoutSeconds": 30,
+
+  "PortScanTimeoutMs": 1000,
+  "EnableAggressiveScanning": false,
+
+  "CheckLog4Shell": true,
+  "SSRFDelayThresholdMs": 5000,
+
+  "MinSecurityLogSizeMB": 1024,
+  "MaxCachedLogons": 0,
+  "RequireLSAProtection": true,
+
+  "CertificateExpiryWarningDays": 30,
+  "SignatureAgeWarningDays": 7,
+
+  "MaxServiceAccountSafeMemberships": 10,
+  "MaxStaleIdentityDays": 180,
+  "RequireAppIDAuthentication": true,
+
+  "MaxUserSafeMemberships": 20,
+  "MaxInactiveUserDays": 90,
+  "MaxPendingApprovalDays": 7,
+  "MaxPermissionDriftPercentage": 20,
+
+  "MaxStandingPrivilegeHours": 8,
+  "RequireJITForAdminAccounts": true,
+
+  "MaxSecretAgeDays": 365,
+  "RequireAllowedMachines": true,
+  "MinAppIDAuthMethods": 2,
+
+  "MaxCloudEntitlementScore": 50,
+  "RequireFederatedAuth": true,
+
+  "MaxReplicationLagMinutes": 15,
+  "RequireBreakGlassAccounts": true,
+
+  "MaxDelegatedAccounts": 10,
+  "MaxShadowAdminPercentage": 5,
+  "SPNPrivilegedAccountLimit": 0,
+  "SIDHistoryAgeThresholdDays": 365,
+  "MaxUnconstrainedDelegation": 0,
+
+  "RequireStaticIP": true,
+  "RequireNonDomainJoined": true,
+  "RequireFIPS": false,
+  "MinRDPEncryptionLevel": 3,
+  "RequireNLA": true,
+
+  "CheckDLLInjection": true,
+  "CheckDLLHijacking": true,
+  "MaxWritableSystemPaths": 0,
+
+  "MaxConjurAPIKeyAgeDays": 90,
+  "RequireConjurMTLS": true,
+
+  "TimingAttackIterations": 10,
+  "TimingVarianceThresholdMs": 50,
+  "BlindSQLDelaySeconds": 5
+}

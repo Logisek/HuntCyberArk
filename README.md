@@ -2,9 +2,9 @@
 
 A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. **Designed for offensive security professionals, red teamers, and penetration testers.**
 
-**Version 4.3** - This tool is designed to run **REMOTELY** against CyberArk servers via network. It does NOT need to be executed on the CyberArk servers themselves. All checks are performed over the network using PVWA API, port scanning, and web testing.
+This tool is designed to run **REMOTELY** against CyberArk servers via network. It does NOT need to be executed on the CyberArk servers themselves. All checks are performed over the network using PVWA API, port scanning, and web testing.
 
-This tool performs **250+ security checks** including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, host security assessments, and enhanced security checks inspired by CyberArk's open-source security tools (zBang, CYBRHardeningCheck, Evasor, Conjur).
+This tool performs security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, and enhanced security checks.
 
 ## Key Features
 
@@ -22,6 +22,9 @@ This tool performs **250+ security checks** including CIS Benchmark compliance, 
 | **Quiet Mode** | Reduced console output for automation and scripting |
 | **Credential Security** | Secure handling with memory cleanup after use |
 | **Comprehensive Reporting** | HTML dashboard, 7 CSV files, and structured JSON for programmatic use |
+| **PoC Evidence** | Request/Response proof-of-concept included in HTML report for penetration testing |
+| **Selective Execution** | Run only specific check categories (portscan, CVE, blackbox, authenticated, network) |
+| **False Positive Reduction** | Baseline fingerprinting to eliminate SPA catch-all false positives |
 
 ## Table of Contents
 
@@ -58,7 +61,6 @@ This tool performs **250+ security checks** including CIS Benchmark compliance, 
 |-------------|-----------------|
 | Phase 1 (Unauthenticated) | Network access to PVWA (HTTPS/443) |
 | Phase 2 (Authenticated) | CyberArk API credentials with Vault Admin or Auditor role |
-| Phase 3 (Host Security) | Local administrator on CyberArk server (optional - use `-IncludeLocalHostChecks`) |
 
 ### Network Requirements
 
@@ -75,7 +77,7 @@ This script is **fully self-contained** and uses only native PowerShell and .NET
 The script leverages:
 - **Native .NET Classes**: `System.Net.Sockets.TcpClient`, `System.Net.Security.SslStream` for network and TLS analysis
 - **Built-in Cmdlets**: `Invoke-WebRequest`, `Invoke-RestMethod` for HTTP/API testing
-- **Windows Management**: `Get-WmiObject`, `Get-CimInstance`, `Get-Service` for host security checks
+- **X.509 Certificates**: `System.Security.Cryptography.X509Certificates` for certificate analysis
 
 ### Step 1: Verify PowerShell Version
 
@@ -91,10 +93,10 @@ Ensure the Major version is **7 or higher**. If not, [download PowerShell 7.x](h
 
 ### Step 2: Download the Script
 
-**Option A: Clone the repository**
+**Option A: Clone the repository (recommended)**
 
 ```powershell
-git clone https://github.com/your-org/HuntCyberArk.git
+git clone https://github.com/Logisek/HuntCyberArk.git
 cd HuntCyberArk
 ```
 
@@ -102,7 +104,7 @@ cd HuntCyberArk
 
 ```powershell
 # Download to current directory
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/your-org/HuntCyberArk/main/CyberArk-Security-Audit.ps1" -OutFile "CyberArk-Security-Audit.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Logisek/HuntCyberArk/main/CyberArk-Security-Audit.ps1" -OutFile "CyberArk-Security-Audit.ps1"
 ```
 
 ### Step 3: Set Execution Policy (if needed)
@@ -155,7 +157,7 @@ winget install Microsoft.PowerShell
 
 ## Audit Phases & Authentication Requirements
 
-The audit runs in three phases, each with different authentication requirements:
+The audit runs in two phases, each with different authentication requirements:
 
 ### Phase 1: Unauthenticated Checks (No credentials required)
 External/blackbox testing that can be run without any credentials:
@@ -207,24 +209,6 @@ Deep configuration audits requiring CyberArk REST API access:
 
 **Required Permissions**: Vault Admin or Auditor role recommended
 
-### Phase 3: Host Security Checks (Optional - Local admin on CyberArk server)
-Windows host hardening checks requiring local execution. **These are skipped by default** for remote audits since this tool is designed to run remotely.
-
-To enable host checks, use `-IncludeLocalHostChecks` **only when running the script directly on a CyberArk server**.
-
-Host checks include:
-- Windows Firewall configuration
-- CyberArk service account settings
-- Credential caching (WDigest, LSA Protection)
-- Windows Event Log configuration
-- Antivirus/EDR status
-- CyberArk service health
-- Server hardening (CYBRHardeningCheck-inspired)
-- Component-specific hardening (Vault, PSM, PVWA, CPM)
-- Application control bypass detection (Evasor-inspired)
-
-**Requirement**: Run script directly on CyberArk server with admin rights and `-IncludeLocalHostChecks`
-
 ## Features
 
 ### Security Check Categories
@@ -236,10 +220,9 @@ Host checks include:
 | Blackbox Testing | BB1 - BB11 | External security testing without authentication |
 | Network Security | NET1 - NET7 | Port scanning and network exposure analysis |
 | TLS Security | TLS1 - TLS4 | SSL/TLS configuration and cipher analysis |
-| CVE Checks | CVE1 - CVE15 | Known CyberArk vulnerability detection (2021-2025) |
+| CVE Checks | CVE1 - CVE23 | Known CyberArk vulnerability detection (2018-2025) |
 | Security Bulletins | CA25-x | CyberArk security bulletin checks |
 | API Security | API1 - API5 | REST API security testing |
-| Host Security | HOST1 - HOST5 | Windows host hardening checks |
 | **Advanced Security** | | |
 | Machine Identity | MID1 - MID9 | Service account, AppID, and AIM Provider security |
 | Secrets Management | SEC1 - SEC14 | Credential Provider/CCP and Conjur security |
@@ -250,14 +233,6 @@ Host checks include:
 | Disaster Recovery | DR1 - DR5 | HA and DR configuration |
 | Compliance Mapping | COMP1 - COMP4 | NIST, SOC2, PCI-DSS alignment |
 | Audit Logging | AUD1 - AUD4 | SIEM and logging validation |
-| **CyberArk Tools Integration** | | |
-| AD Security (zBang) | AD1 - AD7 | Shadow admins, Skeleton Key, SID History, SPNs, Kerberos delegation |
-| Server Hardening (CYBRHardeningCheck) | HARD1 - HARD8 | Server roles, audit policy, RDP, registry, filesystem |
-| Vault Hardening | VAULT1 - VAULT6 | NIC hardening, static IP, domain membership, firewall, certificates |
-| PSM Hardening | PSMH1 - PSMH10 | AppLocker, RDP users, drives hidden, RDS, SMB |
-| PVWA Hardening | PVWAH1 - PVWAH8 | WebDAV, IIS config, app pool, MIME types, cryptography |
-| CPM Hardening | CPMH1 - CPMH4 | FIPS, DEP, credential files, service accounts |
-| Application Control (Evasor) | APPCTL1 - APPCTL5 | DLL injection/hijacking, AppLocker bypasses |
 | **Security Posture Expansion** | | |
 | Secrets Hub | SH1 - SH6 | Cloud secrets sync health, latency, version drift |
 | Remote Access / Alero | RA1 - RA6 | Vendor invitation, MFA, session limits, device binding |
@@ -330,40 +305,36 @@ Host checks include:
 - Key size verification
 - Signature algorithm check
 
-#### CVE-Specific Vulnerability Checks (CVE1 - CVE15)
-- **CVE-2021-31796**: SSRF vulnerability testing
-- **CVE-2022-22536**: Authentication bypass patterns
-- **CVE-2023-43903**: XSS vulnerability patterns
-- **CVE-2024-42340**: DOM XSS detection
-- **CVE-2024-42339**: HTML injection testing
-- **CVE-2024-38996**: PVWA prototype pollution
+#### CVE-Specific Vulnerability Checks (CVE1 - CVE23)
+- **CVE-2018-9842**: Vault memory disclosure via port 1858
+- **CVE-2018-9843**: PVWA deserialization RCE (pre-auth)
+- **CVE-2019-7442**: XXE in SAML authentication
+- **CVE-2021-31796**: Remote credential file exploitation (probes for exposed .cred files, analyzes VerificationsFlag to determine if passwords can be decrypted)
+- **CVE-2021-37151**: CyberArk Identity username enumeration via MFA response length (Medium)
+- **CVE-2022-22700**: CyberArk Identity username enumeration via X-CFY-TX-TM timing header (Medium)
+- **CVE-2024-42340**: CWE-602 Client-side enforcement bypass
+- **CVE-2024-42339**: IDOR / Sensitive information disclosure
+- **CVE-2024-54840**: PVWA Host Header Injection (Medium)
+- **CVE-2024-57967**: PVWA LDAP Mapping privilege escalation (Medium)
 - **CVE-2025-22270**: EPM HTML injection in role management
 - **CVE-2025-22271**: EPM X-Forwarded-For spoofing
 - **CVE-2025-22272**: EPM XSS via modalDlgMsgInternal
 - **CVE-2025-22273**: EPM password change brute force
 - **CVE-2025-22274**: EPM application definition injection
 - **CVE-2025-49827**: Secrets Manager IAM authenticator bypass (Critical)
-- **CVE-2025-49828**: Secrets Manager remote code execution
-- **CVE-2025-49831**: Secrets Manager network bypass
+- **CVE-2025-49828**: Secrets Manager remote code execution (High)
+- **CVE-2025-49829**: Secrets Manager missing validations (Moderate)
+- **CVE-2025-49830**: Secrets Manager path traversal and file disclosure (High)
+- **CVE-2025-49831**: Secrets Manager network bypass (Critical)
 - Security Bulletins: CA25-25, CA25-29, CA25-32, CA25-34, CA25-35
 - Additional checks: Path traversal, Log4Shell indicators, legacy API versions
+- Third-party: ag-grid prototype pollution (CVE-2024-38996), Log4Shell (CVE-2021-44228)
 
 #### API Security Testing (API1 - API5)
 - **BOLA/IDOR**: Broken object level authorization
 - **Injection Testing**: SQL injection, LDAP injection
 - **Mass Assignment**: Privileged property injection
 - **API Versioning**: Legacy API endpoint detection
-
-#### Host Security (HOST1 - HOST5)
-*Requires `-IncludeLocalHostChecks` and local execution on CyberArk server*
-- Windows Firewall configuration
-- CyberArk service account analysis
-- Credential caching (WDigest, cached logons)
-- LSA Protection verification
-- Event log configuration
-- Audit policy verification
-- Antivirus/EDR status
-- CyberArk service health
 
 #### Advanced Security Checks
 - Component version detection and CVE mapping
@@ -461,61 +432,6 @@ Host checks include:
 - **Unconstrained Delegation**: Discover accounts with unconstrained Kerberos delegation
 - **Constrained Delegation with Protocol Transition**: Detect S4U2Self abuse potential
 - **Delegation Privilege Audit**: Comprehensive delegation configuration summary
-
-#### Server Hardening (HARD1 - HARD8) - CYBRHardeningCheck-inspired
-*Runs automatically on CyberArk servers with `-IncludeLocalHostChecks`*
-- Unnecessary Windows Server roles detection
-- Screen saver configuration validation
-- Advanced audit policy completeness
-- Remote Desktop hardening (NLA, encryption, timeout)
-- Registry permissions on security keys
-- Registry auditing configuration
-- File system permissions on Config directories
-- File system auditing on critical paths
-
-#### Vault Hardening (VAULT1 - VAULT6)
-*Runs automatically on Vault servers*
-- NIC hardening (single NIC, minimal protocols)
-- Static IP configuration (no DHCP)
-- Domain membership check (should be workgroup)
-- Logic Container service account validation
-- Firewall non-standard rules detection
-- Vault server certificate validation
-
-#### PSM Hardening (PSMH1 - PSMH10)
-*Runs automatically on PSM servers*
-- PSM user configuration validation
-- Remote Desktop Users group cleared
-- AppLocker policy enforcement
-- Local drives hidden from sessions
-- IE Developer Tools blocked
-- RDS hardening (clipboard, drive, printer redirection)
-- PSM user access restrictions
-- SMB services hardening
-
-#### PVWA Hardening (PVWAH1 - PVWAH8)
-*Runs automatically on PVWA servers*
-- WebDAV disabled verification
-- Anonymous authentication disabled
-- Application pool configuration
-- MIME types security
-- Cryptography settings (FIPS)
-- Installation location (non-system drive)
-
-#### CPM Hardening (CPMH1 - CPMH4)
-*Runs automatically on CPM servers*
-- FIPS cryptography mode
-- DEP (Data Execution Prevention) configuration
-- Credential file permissions
-- Service account configuration
-
-#### Application Control (APPCTL1 - APPCTL5) - Evasor-inspired
-*Requires `-IncludeAppControlChecks` parameter*
-- **DLL Injection Vulnerability**: Check for processes vulnerable to DLL injection via MavInject
-- **DLL Hijacking Risk**: Identify writable directories in CyberArk paths
-- **Resource Hijacking**: Detect replaceable configuration and script files
-- **AppLocker Bypass Paths**: Check for writable bypass locations
-- **Writable System Paths**: Identify writable paths in system directories
 
 #### Secrets Hub (SH1 - SH6)
 *Requires `-IncludeSecretsHubChecks` and optionally `-SecretsHubUrl`*
@@ -664,7 +580,6 @@ Host checks include:
 |-------|-------------|---------|
 | Phase 1 | Network access to PVWA | Blackbox testing, port scanning, TLS analysis |
 | Phase 2 | CyberArk API credentials | Configuration audits, policy checks |
-| Phase 3 | Local admin on CyberArk server | Windows security, service, and registry checks |
 
 ### Credential Requirements for Authenticated Checks
 
@@ -682,10 +597,6 @@ The script uses these Windows/PowerShell features (no installation required):
 | `System.Net.Sockets.TcpClient` | Port scanning, Vault port security |
 | `System.Net.Security.SslStream` | TLS/SSL protocol and cipher enumeration |
 | `Invoke-WebRequest` / `Invoke-RestMethod` | HTTP testing, API calls |
-| `Get-WmiObject` / `Get-CimInstance` | Service account analysis, AV status |
-| `Get-Service` | CyberArk service health checks |
-| `Get-NetFirewallRule` | Windows Firewall configuration |
-| Registry access | Credential caching, LSA protection checks |
 
 ## Quick Start
 
@@ -745,11 +656,25 @@ $cred = Get-Credential
     -SkipCloudChecks
 ```
 
-### Include Local Host Checks (On CyberArk Server Only)
+### Run ONLY Specific Check Categories
+
+Use `-Only*` parameters to run specific check categories exclusively:
 
 ```powershell
-# Only use when running directly on a CyberArk server
-.\CyberArk-Security-Audit.ps1 -PVWA "https://localhost" -AuthType CyberArk -IncludeLocalHostChecks
+# Run ONLY port scanning
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyPortScan
+
+# Run ONLY CVE vulnerability checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyCVEChecks
+
+# Run ONLY network security checks (ports, TLS, DNS)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyNetworkChecks
+
+# Run ONLY unauthenticated blackbox checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyBlackboxChecks
+
+# Run ONLY authenticated API checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyAuthenticatedChecks -Credential $cred
 ```
 
 ### Full Options Example
@@ -785,11 +710,11 @@ $cred = Get-Credential
 # Internal security audit (with CyberArk credentials)
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -AuthType LDAP
 
-# Full audit on CyberArk server (run locally with admin)
-.\CyberArk-Security-Audit.ps1 -PVWA "https://localhost" -AuthType CyberArk -IncludeLocalHostChecks
-
 # Quick check (skip intensive scans)
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan -SkipCVEChecks
+
+# Fast parallel port scanning (4.5x faster on PowerShell 7+)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -ParallelExecution -MaxThreads 10
 ```
 
 ### Red Team Scenarios
@@ -840,12 +765,6 @@ $cred = Get-Credential
 # AD Security with specific Domain Controller
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeADChecks -DomainController "dc01.domain.com"
 
-# Full hardening check on CyberArk server (CYBRHardeningCheck-inspired)
-.\CyberArk-Security-Audit.ps1 -PVWA "https://localhost" -AuthType CyberArk -IncludeLocalHostChecks
-
-# Application control bypass detection (Evasor-inspired)
-.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeAppControlChecks -IncludeLocalHostChecks
-
 # Conjur/Secrets Manager integration check
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -IncludeConjurChecks -ConjurUrl "https://conjur.domain.com"
 
@@ -857,9 +776,6 @@ $cred = Get-Credential
     -IncludeConjurChecks `
     -ConjurUrl "https://conjur.domain.com" `
     -ComplianceMapping
-
-# Skip hardening checks (faster scan)
-.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipHardeningChecks
 ```
 
 ### Reporting & Output Scenarios
@@ -996,7 +912,6 @@ C:\SecurityReports\CyberArk\
 | Credential | No | Prompt | PSCredential for authentication |
 | **Skip Parameters** | | | |
 | SkipPortScan | No | False | Skip network port scanning |
-| SkipHostChecks | No | (deprecated) | Deprecated - host checks are skipped by default for remote audits |
 | SkipCVEChecks | No | False | Skip CVE-specific vulnerability testing |
 | SkipAPITests | No | False | Skip API security testing |
 | SkipAuthenticatedChecks | No | False | Skip all Phase 2 authenticated checks |
@@ -1005,7 +920,7 @@ C:\SecurityReports\CyberArk\
 | SkipIGAChecks | No | False | Skip Identity Governance checks (IGA1-IGA8) |
 | SkipCloudChecks | No | False | Skip Cloud Security checks (CLD1-CLD6) |
 | SkipDRChecks | No | False | Skip Disaster Recovery checks (DR1-DR5) |
-| SkipHardeningChecks | No | False | Skip component hardening checks (HARD, VAULT, PSM, PVWA, CPM) |
+| SkipDefaultCredentialTests | No | False | Skip default/weak credential testing (BB3) |
 | SkipSecretsHubChecks | No | False | Skip Secrets Hub checks (SH1-SH6) |
 | SkipRemoteAccessChecks | No | False | Skip Remote Access/Alero checks (RA1-RA6) |
 | SkipK8sChecks | No | False | Skip Kubernetes checks (K8S1-K8S8) |
@@ -1023,12 +938,16 @@ C:\SecurityReports\CyberArk\
 | SkipNetworkSegmentationChecks | No | False | Skip Network Segmentation checks (NSG1-NSG5) |
 | **Mode Parameters** | | | |
 | UnauthenticatedOnly | No | False | Run only Phase 1 (no credentials needed) |
-| IncludeLocalHostChecks | No | False | Include local host security checks (only use when on CyberArk server) |
 | IncludeEPMChecks | No | False | Include EPM integration checks |
 | ComplianceMapping | No | False | Generate compliance framework mapping |
+| **Selective Execution** | | | |
+| OnlyPortScan | No | False | Run ONLY port scanning checks |
+| OnlyCVEChecks | No | False | Run ONLY CVE vulnerability checks |
+| OnlyAuthenticatedChecks | No | False | Run ONLY authenticated API checks |
+| OnlyNetworkChecks | No | False | Run ONLY network security checks (TLS, ports, DNS) |
+| OnlyBlackboxChecks | No | False | Run ONLY unauthenticated blackbox checks |
 | **CyberArk Tools Parameters** | | | |
 | IncludeADChecks | No | False | Enable Active Directory security checks (zBang-inspired) |
-| IncludeAppControlChecks | No | False | Enable application control bypass detection (Evasor-inspired) |
 | IncludeConjurChecks | No | False | Enable Conjur/Secrets Manager integration checks |
 | ConjurUrl | No | - | Conjur server URL for integration checks |
 | DomainController | No | - | Domain controller for AD security queries |
@@ -1062,6 +981,7 @@ C:\SecurityReports\CyberArk\
 | K8sNamespace | No | default | Kubernetes namespace for secrets checks |
 | ConjurApplianceUrl | No | - | Conjur appliance URL for K8s integration |
 | IncludeDevSecOpsChecks | No | False | Enable DevSecOps pipeline security checks |
+| IncludePrivilegeCloudChecks | No | False | Enable Privilege Cloud/SaaS-specific checks |
 | IsPrivilegeCloud | No | False | Indicate target is Privilege Cloud SaaS |
 | PrivilegeCloudTenant | No | - | Privilege Cloud tenant identifier |
 | IncludeIdentityChecks | No | False | Enable CyberArk Identity/Idaptive checks |
@@ -1099,6 +1019,7 @@ A modern, interactive HTML report with:
 - **CIS Benchmark Compliance Matrix**: Control-by-control compliance status
 - **Detailed Findings Table**: Expandable rows with full evidence and remediation steps
   - Click any finding to reveal: evidence, technical details, risk description, business impact, CVSS score, remediation steps, and references
+  - **Proof of Concept (PoC)**: Request/Response evidence for penetration testing reports (when available)
 - **Remediation Roadmap**: Prioritized timeline (24h/1wk/30d/90d)
 - **Component Analysis**: Findings grouped by CyberArk component (Vault, CPM, PSM, PVWA, PTA)
 - **Skipped Checks**: Manual verification requirements with follow-up guidance
@@ -1170,6 +1091,8 @@ Each finding now includes comprehensive information for report writing:
 | `RemediationSteps` | Step-by-step remediation guidance |
 | `ComplianceRefs` | Compliance framework references |
 | `References` | Documentation links |
+| `PoCRequest` | HTTP request proof-of-concept (when available) |
+| `PoCResponse` | HTTP response proof-of-concept (when available) |
 
 ### Risk Scoring
 
@@ -1209,22 +1132,6 @@ The output is designed to help you write professional security assessment report
 **Always obtain proper authorization before running this script.**
 
 **Use `-OPSECMode` for reduced detection footprint during red team operations.**
-
-## Known Vulnerable CyberArk Versions
-
-The script checks for the following known vulnerable versions:
-
-| Version | CVEs |
-|---------|------|
-| 10.9 | CVE-2021-31796 |
-| 10.10 | CVE-2021-31796, CVE-2021-44228 |
-| 11.0 | CVE-2021-44228 |
-| 11.1-11.2 | CVE-2022-22536 |
-| 12.0-12.1 | CVE-2023-43903 |
-| 12.2 | CVE-2024-42339, CVE-2024-42340 |
-| 14.0 | CVE-2025-49827, CVE-2025-49828, CVE-2025-49829, CVE-2025-49830, CVE-2025-49831, CA25-32 |
-| 14.2 | CVE-2024-38996, CA25-34, CA25-35 |
-| 24.7 (EPM SaaS) | CVE-2025-22270, CVE-2025-22271, CVE-2025-22272, CVE-2025-22273, CVE-2025-22274 |
 
 ## Troubleshooting
 
@@ -1312,16 +1219,6 @@ Invoke-RestMethod -Uri "https://pvwa.domain.com/PasswordVault/api/Auth/LDAP/Logo
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan
 ```
 
-#### Host Security Checks Not Running
-
-**Info**: Host security checks are skipped by default for remote audits
-
-**Solution**: Host checks examine the LOCAL machine, not CyberArk servers. Only use `-IncludeLocalHostChecks` when running the script directly on a CyberArk server:
-```powershell
-# Run on a CyberArk server with local admin rights
-.\CyberArk-Security-Audit.ps1 -PVWA "https://localhost" -AuthType CyberArk -IncludeLocalHostChecks
-```
-
 #### Report Generation Errors
 
 **Error**: Cannot write report files
@@ -1352,8 +1249,6 @@ If you encounter issues not covered above:
 
 ### CyberArk Open Source Security Tools
 - [zBang](https://github.com/cyberark/zBang) - Risk assessment tool for privileged account threats (Shadow Admins, Kerberos, SPNs)
-- [CYBRHardeningCheck](https://github.com/cyberark/CYBRHardeningCheck) - CyberArk component server hardening verification
-- [Evasor](https://github.com/cyberark/Evasor) - Application control bypass detection tool
 - [Conjur](https://github.com/cyberark/conjur) - Secrets management platform
 - [ACLight](https://github.com/cyberark/ACLight) - Shadow Admin discovery (part of zBang)
 - [Ansible Security Automation Collection](https://github.com/cyberark/ansible-security-automation-collection) - CyberArk Ansible integration
