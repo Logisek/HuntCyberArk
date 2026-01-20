@@ -331,7 +331,7 @@ Host checks include:
 - Signature algorithm check
 
 #### CVE-Specific Vulnerability Checks (CVE1 - CVE15)
-- **CVE-2021-31796**: SSRF vulnerability testing
+- **CVE-2021-31796**: Remote credential file exploitation (probes for exposed .cred files, analyzes VerificationsFlag to determine if passwords can be decrypted)
 - **CVE-2022-22536**: Authentication bypass patterns
 - **CVE-2023-43903**: XSS vulnerability patterns
 - **CVE-2024-42340**: DOM XSS detection

