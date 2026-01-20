@@ -93,7 +93,7 @@ Ensure the Major version is **7 or higher**. If not, [download PowerShell 7.x](h
 
 ### Step 2: Download the Script
 
-**Option A: Clone the repository**
+**Option A: Clone the repository (recommended)**
 
 ```powershell
 git clone https://github.com/Logisek/HuntCyberArk.git
@@ -712,6 +712,9 @@ Use `-Only*` parameters to run specific check categories exclusively:
 
 # Quick check (skip intensive scans)
 .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan -SkipCVEChecks
+
+# Fast parallel port scanning (4.5x faster on PowerShell 7+)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -ParallelExecution -MaxThreads 10
 ```
 
 ### Red Team Scenarios

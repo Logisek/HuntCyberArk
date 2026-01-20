@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     CyberArk PAM Security Configuration Audit Script - Red Team Edition
 .DESCRIPTION
@@ -75,11 +75,36 @@
 .EXAMPLE
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyAuthenticatedChecks -Credential $cred
     # Run only authenticated API checks
-.NOTES    "C:\Users\GeorgeKarpouzas\Downloads\screenshot.png"
-    WARNING: Some tests (port scanning, CVE checks, WAF evasion) may trigger security alerts.
-    Always obtain proper authorization before running this script.
-    
-    Use -OPSECMode for reduced detection footprint during red team operations.
+.PARAMETER ConfigFile
+    Path to an external JSON configuration file containing threshold overrides.
+    The file should contain key-value pairs matching the configuration keys (e.g., MinPasswordLength, MaxPasswordAgeDays).
+    Configuration is loaded in priority order: Parameter overrides > Config file > Defaults
+.PARAMETER ConfigMinPasswordLength
+    Override the minimum password length threshold (default: 14, range: 8-128)
+.PARAMETER ConfigMaxPasswordAgeDays
+    Override the maximum password age threshold in days (default: 90, range: 1-365)
+.PARAMETER ConfigMinVersionRetention
+    Override the minimum version retention count (default: 5, range: 1-100)
+.PARAMETER ConfigSessionTimeoutMinutes
+    Override the session timeout threshold in minutes (default: 20, range: 1-1440)
+.PARAMETER ConfigMaxFailedLogins
+    Override the maximum failed logins threshold (default: 5, range: 1-100)
+.PARAMETER ConfigMinTLSVersion
+    Override the minimum TLS version requirement (default: 1.2, values: 1.0, 1.1, 1.2, 1.3)
+.PARAMETER ConfigMaxInactiveAccountDays
+    Override the maximum inactive account days threshold (default: 90, range: 1-365)
+.PARAMETER ConfigCertificateExpiryWarningDays
+    Override the certificate expiry warning threshold in days (default: 30, range: 1-365)
+.PARAMETER ConfigPageLimit
+    Override the API pagination limit (default: 1000, range: 100-10000)
+.PARAMETER ConfigTimeoutSeconds
+    Override the API request timeout in seconds (default: 30, range: 5-300)
+.EXAMPLE
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -ConfigFile "C:\Config\audit-config.json"
+    # Load configuration from external JSON file
+.EXAMPLE
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -ConfigMinPasswordLength 16 -ConfigMaxPasswordAgeDays 60
+    # Override specific thresholds via command-line parameters
 #>
 
 #Requires -Version 7.0
@@ -396,11 +421,63 @@ param(
     [switch]$OnlyNetworkChecks,
 
     [Parameter(Mandatory = $false)]
-    [switch]$OnlyBlackboxChecks
+    [switch]$OnlyBlackboxChecks,
+
+    # External Configuration File
+    [Parameter(Mandatory = $false)]
+    [ValidateScript({
+        if ([string]::IsNullOrEmpty($_)) { $true }
+        elseif (Test-Path $_) { $true }
+        else { throw "ConfigFile path does not exist: $_" }
+    })]
+    [string]$ConfigFile,
+
+    # Key Threshold Overrides - Allow command-line override of common thresholds
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(8, 128)]
+    [int]$ConfigMinPasswordLength,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 365)]
+    [int]$ConfigMaxPasswordAgeDays,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 100)]
+    [int]$ConfigMinVersionRetention,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 1440)]
+    [int]$ConfigSessionTimeoutMinutes,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 100)]
+    [int]$ConfigMaxFailedLogins,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("1.0", "1.1", "1.2", "1.3")]
+    [string]$ConfigMinTLSVersion,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 365)]
+    [int]$ConfigMaxInactiveAccountDays,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 365)]
+    [int]$ConfigCertificateExpiryWarningDays,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(100, 10000)]
+    [int]$ConfigPageLimit,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(5, 300)]
+    [int]$ConfigTimeoutSeconds
 )
 
 #region Configuration
-$script:Config = @{
+
+# Default configuration - can be overridden by external config file or parameters
+$script:DefaultConfig = @{
     # CIS Benchmark thresholds
     MinPasswordLength = 14
     MaxPasswordAgeDays = 90
@@ -522,6 +599,238 @@ $script:Config = @{
 
     # WAF Evasion payloads
     WAFEvasionEncodings = @("UrlEncode", "DoubleUrlEncode", "UnicodeEncode", "Base64", "HexEncode")
+}
+
+function Initialize-Configuration {
+    <#
+    .SYNOPSIS
+        Initializes the script configuration from defaults, external file, and parameter overrides.
+    .DESCRIPTION
+        Configuration is loaded in the following priority order (highest to lowest):
+        1. Command-line parameter overrides (ConfigMinPasswordLength, etc.)
+        2. External configuration file (JSON format via -ConfigFile)
+        3. Default configuration values embedded in script
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Start with default configuration
+    $script:Config = $script:DefaultConfig.Clone()
+
+    # Deep clone nested hashtables (VulnerableVersions, UserAgents, WAFEvasionEncodings)
+    foreach ($key in $script:DefaultConfig.Keys) {
+        $value = $script:DefaultConfig[$key]
+        if ($value -is [hashtable]) {
+            $script:Config[$key] = @{}
+            foreach ($nestedKey in $value.Keys) {
+                $script:Config[$key][$nestedKey] = $value[$nestedKey]
+            }
+        }
+        elseif ($value -is [array]) {
+            $script:Config[$key] = $value.Clone()
+        }
+    }
+
+    # Load external configuration file if specified
+    if (-not [string]::IsNullOrEmpty($ConfigFile)) {
+        Write-Host "[*] Loading configuration from: $ConfigFile" -ForegroundColor Cyan
+
+        try {
+            $fileContent = Get-Content -Path $ConfigFile -Raw -ErrorAction Stop
+            $externalConfig = $fileContent | ConvertFrom-Json -ErrorAction Stop
+
+            # Merge external config into script config
+            foreach ($property in $externalConfig.PSObject.Properties) {
+                $key = $property.Name
+                $value = $property.Value
+
+                if ($script:Config.ContainsKey($key)) {
+                    # Handle nested objects (like VulnerableVersions)
+                    if ($value -is [PSCustomObject] -and $script:Config[$key] -is [hashtable]) {
+                        foreach ($nestedProp in $value.PSObject.Properties) {
+                            $script:Config[$key][$nestedProp.Name] = $nestedProp.Value
+                        }
+                    }
+                    elseif ($value -is [array]) {
+                        $script:Config[$key] = @($value)
+                    }
+                    else {
+                        $script:Config[$key] = $value
+                    }
+                    Write-Verbose "Config override from file: $key = $value"
+                }
+                else {
+                    Write-Warning "Unknown configuration key in file: $key (ignored)"
+                }
+            }
+
+            Write-Host "[+] External configuration loaded successfully" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Failed to load configuration file: $($_.Exception.Message)"
+            Write-Warning "Continuing with default configuration"
+        }
+    }
+
+    # Apply command-line parameter overrides (highest priority)
+    $parameterOverrides = @{
+        'ConfigMinPasswordLength'          = 'MinPasswordLength'
+        'ConfigMaxPasswordAgeDays'         = 'MaxPasswordAgeDays'
+        'ConfigMinVersionRetention'        = 'MinVersionRetention'
+        'ConfigSessionTimeoutMinutes'      = 'SessionTimeoutMinutes'
+        'ConfigMaxFailedLogins'            = 'MaxFailedLogins'
+        'ConfigMinTLSVersion'              = 'MinTLSVersion'
+        'ConfigMaxInactiveAccountDays'     = 'MaxInactiveAccountDays'
+        'ConfigCertificateExpiryWarningDays' = 'CertificateExpiryWarningDays'
+        'ConfigPageLimit'                  = 'PageLimit'
+        'ConfigTimeoutSeconds'             = 'TimeoutSeconds'
+    }
+
+    foreach ($paramName in $parameterOverrides.Keys) {
+        $configKey = $parameterOverrides[$paramName]
+        $paramValue = Get-Variable -Name $paramName -ValueOnly -ErrorAction SilentlyContinue
+
+        if ($null -ne $paramValue -and $paramValue -ne 0 -and $paramValue -ne '') {
+            $script:Config[$configKey] = $paramValue
+            Write-Verbose "Config override from parameter: $configKey = $paramValue"
+        }
+    }
+
+    # Log active configuration summary if verbose
+    if ($VerboseOutput -or $VerbosePreference -eq 'Continue') {
+        Write-Host "`n[*] Active Configuration Summary:" -ForegroundColor Cyan
+        Write-Host "    MinPasswordLength: $($script:Config.MinPasswordLength)"
+        Write-Host "    MaxPasswordAgeDays: $($script:Config.MaxPasswordAgeDays)"
+        Write-Host "    SessionTimeoutMinutes: $($script:Config.SessionTimeoutMinutes)"
+        Write-Host "    MaxFailedLogins: $($script:Config.MaxFailedLogins)"
+        Write-Host "    MinTLSVersion: $($script:Config.MinTLSVersion)"
+        Write-Host "    PageLimit: $($script:Config.PageLimit)"
+        Write-Host "    TimeoutSeconds: $($script:Config.TimeoutSeconds)"
+        Write-Host ""
+    }
+}
+
+function Export-DefaultConfiguration {
+    <#
+    .SYNOPSIS
+        Exports the default configuration to a JSON file for customization.
+    .PARAMETER Path
+        The output path for the JSON configuration file.
+    .EXAMPLE
+        Export-DefaultConfiguration -Path "C:\Config\cyberark-audit-config.json"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # Create a clean config object for export (excluding complex objects that don't serialize well)
+    $exportConfig = [ordered]@{
+        # CIS Benchmark thresholds
+        MinPasswordLength        = $script:DefaultConfig.MinPasswordLength
+        MaxPasswordAgeDays       = $script:DefaultConfig.MaxPasswordAgeDays
+        MinVersionRetention      = $script:DefaultConfig.MinVersionRetention
+        SessionTimeoutMinutes    = $script:DefaultConfig.SessionTimeoutMinutes
+        MaxFailedLogins          = $script:DefaultConfig.MaxFailedLogins
+        MinTLSVersion            = $script:DefaultConfig.MinTLSVersion
+
+        # CyberArk Vendor Best Practice thresholds
+        MinValidityPeriod            = $script:DefaultConfig.MinValidityPeriod
+        MaxExclusiveAccessDuration   = $script:DefaultConfig.MaxExclusiveAccessDuration
+        MaxPendingAccountAgeDays     = $script:DefaultConfig.MaxPendingAccountAgeDays
+        MinReconcileFrequencyDays    = $script:DefaultConfig.MinReconcileFrequencyDays
+        MaxInactiveAccountDays       = $script:DefaultConfig.MaxInactiveAccountDays
+        RequireDualControlForSensitive = $script:DefaultConfig.RequireDualControlForSensitive
+        PSMRecordingRequired         = $script:DefaultConfig.PSMRecordingRequired
+
+        # API settings
+        PageLimit       = $script:DefaultConfig.PageLimit
+        TimeoutSeconds  = $script:DefaultConfig.TimeoutSeconds
+
+        # Network Security settings
+        PortScanTimeoutMs        = $script:DefaultConfig.PortScanTimeoutMs
+        EnableAggressiveScanning = $script:DefaultConfig.EnableAggressiveScanning
+
+        # CVE Check settings
+        CheckLog4Shell          = $script:DefaultConfig.CheckLog4Shell
+        SSRFDelayThresholdMs    = $script:DefaultConfig.SSRFDelayThresholdMs
+
+        # Host Security settings
+        MinSecurityLogSizeMB    = $script:DefaultConfig.MinSecurityLogSizeMB
+        MaxCachedLogons         = $script:DefaultConfig.MaxCachedLogons
+        RequireLSAProtection    = $script:DefaultConfig.RequireLSAProtection
+
+        # Vulnerability thresholds
+        CertificateExpiryWarningDays = $script:DefaultConfig.CertificateExpiryWarningDays
+        SignatureAgeWarningDays      = $script:DefaultConfig.SignatureAgeWarningDays
+
+        # Machine Identity Security thresholds
+        MaxServiceAccountSafeMemberships = $script:DefaultConfig.MaxServiceAccountSafeMemberships
+        MaxStaleIdentityDays            = $script:DefaultConfig.MaxStaleIdentityDays
+        RequireAppIDAuthentication      = $script:DefaultConfig.RequireAppIDAuthentication
+
+        # Identity Governance thresholds
+        MaxUserSafeMemberships       = $script:DefaultConfig.MaxUserSafeMemberships
+        MaxInactiveUserDays          = $script:DefaultConfig.MaxInactiveUserDays
+        MaxPendingApprovalDays       = $script:DefaultConfig.MaxPendingApprovalDays
+        MaxPermissionDriftPercentage = $script:DefaultConfig.MaxPermissionDriftPercentage
+
+        # Zero Standing Privileges thresholds
+        MaxStandingPrivilegeHours   = $script:DefaultConfig.MaxStandingPrivilegeHours
+        RequireJITForAdminAccounts  = $script:DefaultConfig.RequireJITForAdminAccounts
+
+        # Secrets Management thresholds
+        MaxSecretAgeDays         = $script:DefaultConfig.MaxSecretAgeDays
+        RequireAllowedMachines   = $script:DefaultConfig.RequireAllowedMachines
+        MinAppIDAuthMethods      = $script:DefaultConfig.MinAppIDAuthMethods
+
+        # Cloud Security thresholds
+        MaxCloudEntitlementScore = $script:DefaultConfig.MaxCloudEntitlementScore
+        RequireFederatedAuth     = $script:DefaultConfig.RequireFederatedAuth
+
+        # Disaster Recovery thresholds
+        MaxReplicationLagMinutes    = $script:DefaultConfig.MaxReplicationLagMinutes
+        RequireBreakGlassAccounts   = $script:DefaultConfig.RequireBreakGlassAccounts
+
+        # Active Directory Security thresholds
+        MaxDelegatedAccounts        = $script:DefaultConfig.MaxDelegatedAccounts
+        MaxShadowAdminPercentage    = $script:DefaultConfig.MaxShadowAdminPercentage
+        SPNPrivilegedAccountLimit   = $script:DefaultConfig.SPNPrivilegedAccountLimit
+        SIDHistoryAgeThresholdDays  = $script:DefaultConfig.SIDHistoryAgeThresholdDays
+        MaxUnconstrainedDelegation  = $script:DefaultConfig.MaxUnconstrainedDelegation
+
+        # Server Hardening thresholds
+        RequireStaticIP          = $script:DefaultConfig.RequireStaticIP
+        RequireNonDomainJoined   = $script:DefaultConfig.RequireNonDomainJoined
+        RequireFIPS              = $script:DefaultConfig.RequireFIPS
+        MinRDPEncryptionLevel    = $script:DefaultConfig.MinRDPEncryptionLevel
+        RequireNLA               = $script:DefaultConfig.RequireNLA
+
+        # Application Control thresholds
+        CheckDLLInjection        = $script:DefaultConfig.CheckDLLInjection
+        CheckDLLHijacking        = $script:DefaultConfig.CheckDLLHijacking
+        MaxWritableSystemPaths   = $script:DefaultConfig.MaxWritableSystemPaths
+
+        # Conjur/Secrets Manager thresholds
+        MaxConjurAPIKeyAgeDays   = $script:DefaultConfig.MaxConjurAPIKeyAgeDays
+        RequireConjurMTLS        = $script:DefaultConfig.RequireConjurMTLS
+
+        # Timing attack thresholds
+        TimingAttackIterations      = $script:DefaultConfig.TimingAttackIterations
+        TimingVarianceThresholdMs   = $script:DefaultConfig.TimingVarianceThresholdMs
+        BlindSQLDelaySeconds        = $script:DefaultConfig.BlindSQLDelaySeconds
+    }
+
+    try {
+        $exportConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Encoding UTF8
+        Write-Host "[+] Default configuration exported to: $Path" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Warning "Failed to export configuration: $($_.Exception.Message)"
+        return $false
+    }
 }
 
 # CIS Benchmark Control Mappings
@@ -853,6 +1162,42 @@ $script:CISControls = @{
     "NSG5" = "Component-specific network ACLs"
 }
 #endregion
+
+#======================================================================
+# MODULE LOADING
+#======================================================================
+# The script now supports modular architecture. Core functions are available
+# in the modules/ directory for better maintainability:
+#   - modules/Core.ps1           - Helper functions, logging, baseline detection
+#   - modules/CVE-Checks.ps1     - CVE vulnerability testing
+#   - modules/Network-Security.ps1 - Port scanning, TLS, cipher checks
+#   - modules/API-Security.ps1   - BOLA, injection, API security tests
+#   - modules/Reporting.ps1      - HTML, CSV, JSON report generation
+#
+# Functions defined in this main script take precedence over module functions.
+# Modules are optional - the script includes all functions inline for standalone use.
+#
+# To use modular approach, uncomment the following section:
+# 
+# $script:ModulesPath = Join-Path $PSScriptRoot "modules"
+# if (Test-Path $script:ModulesPath) {
+#     $moduleFiles = @(
+#         "Core.ps1",
+#         "Network-Security.ps1",
+#         "CVE-Checks.ps1",
+#         "API-Security.ps1",
+#         "Reporting.ps1"
+#     )
+#     foreach ($module in $moduleFiles) {
+#         $modulePath = Join-Path $script:ModulesPath $module
+#         if (Test-Path $modulePath) {
+#             Write-Verbose "Loading module: $module"
+#             . $modulePath
+#         }
+#     }
+#     Write-Verbose "Modules loaded from: $($script:ModulesPath)"
+# }
+#======================================================================
 
 #region UI Functions
 
@@ -5068,6 +5413,7 @@ function Test-PortScan {
 
     $uri = [System.Uri]$PVWA
     $targetHost = $uri.Host
+    $timeout = $script:Config.PortScanTimeoutMs
 
     # CyberArk-specific ports to check
     $cyberArkPorts = @(
@@ -5101,52 +5447,181 @@ function Test-PortScan {
         @{ Port = 69;    Service = "TFTP"; Expected = $false; Severity = "Critical" }
     )
 
-    foreach ($portInfo in $cyberArkPorts) {
-        try {
-            $tcpClient = New-Object System.Net.Sockets.TcpClient
-            $asyncResult = $tcpClient.BeginConnect($targetHost, $portInfo.Port, $null, $null)
-            $wait = $asyncResult.AsyncWaitHandle.WaitOne(1000, $false)
-
-            if ($wait -and $tcpClient.Connected) {
-                $tcpClient.EndConnect($asyncResult)
-                $tcpClient.Close()
-
-                if (-not $portInfo.Expected) {
-                    $cisControl = switch ($portInfo.Port) {
-                        1858 { "NET2" }
-                        { $_ -in @(3389, 22, 23) } { "NET5" }
-                        { $_ -in @(445, 139, 135) } { "NET4" }
-                        { $_ -in @(1433, 1434, 3306, 5432, 1521) } { "NET6" }
-                        default { "NET1" }
-                    }
-
-                    Add-Finding -Category "Network Security" `
-                        -CISControl $cisControl `
-                        -Finding "Exposed port detected" `
-                        -Resource "$targetHost`:$($portInfo.Port)" `
-                        -CurrentValue "$($portInfo.Service) - OPEN" `
-                        -ExpectedValue "Port closed or filtered" `
-                        -Recommendation "Restrict access to $($portInfo.Service) port through firewall" `
-                        -Severity $portInfo.Severity
+    # Helper function to process port scan results
+    function Add-PortScanFinding {
+        param($PortInfo, $TargetHost, $IsOpen)
+        
+        if ($IsOpen) {
+            if (-not $PortInfo.Expected) {
+                $cisControl = switch ($PortInfo.Port) {
+                    1858 { "NET2" }
+                    { $_ -in @(3389, 22, 23) } { "NET5" }
+                    { $_ -in @(445, 139, 135) } { "NET4" }
+                    { $_ -in @(1433, 1434, 3306, 5432, 1521) } { "NET6" }
+                    default { "NET1" }
                 }
-                else {
-                    Add-Finding -Category "Network Security" `
-                        -CISControl "NET1" `
-                        -Finding "Expected service port open" `
-                        -Resource "$targetHost`:$($portInfo.Port)" `
-                        -CurrentValue "$($portInfo.Service) - OPEN" `
-                        -ExpectedValue "Port open (expected)" `
-                        -Recommendation "N/A - Expected service" `
-                        -Severity "Info" `
-                        -Status "Pass"
-                }
+
+                Add-Finding -Category "Network Security" `
+                    -CISControl $cisControl `
+                    -Finding "Exposed port detected" `
+                    -Resource "$TargetHost`:$($PortInfo.Port)" `
+                    -CurrentValue "$($PortInfo.Service) - OPEN" `
+                    -ExpectedValue "Port closed or filtered" `
+                    -Recommendation "Restrict access to $($PortInfo.Service) port through firewall" `
+                    -Severity $PortInfo.Severity
             }
             else {
-                $tcpClient.Close()
+                Add-Finding -Category "Network Security" `
+                    -CISControl "NET1" `
+                    -Finding "Expected service port open" `
+                    -Resource "$TargetHost`:$($PortInfo.Port)" `
+                    -CurrentValue "$($PortInfo.Service) - OPEN" `
+                    -ExpectedValue "Port open (expected)" `
+                    -Recommendation "N/A - Expected service" `
+                    -Severity "Info" `
+                    -Status "Pass"
             }
         }
-        catch {
-            # Port closed or filtered - expected for most ports
+    }
+
+    # Check if parallel execution is enabled and PowerShell 7+ is available
+    if ($ParallelExecution -and $PSVersionTable.PSVersion.Major -ge 7) {
+        Write-AuditLog "Using parallel port scanning (PowerShell 7+ async) with $MaxThreads threads..." -Level Info
+        
+        # Use runspaces for true async parallel port scanning
+        $runspacePool = [runspacefactory]::CreateRunspacePool(1, $MaxThreads)
+        $runspacePool.Open()
+        
+        $jobs = @()
+        
+        # Scriptblock for async port scanning
+        $portScanScript = {
+            param($ScanHost, $Port, $Service, $Expected, $Severity, $Timeout)
+            
+            $result = [PSCustomObject]@{
+                Port = $Port
+                Service = $Service
+                Expected = $Expected
+                Severity = $Severity
+                IsOpen = $false
+            }
+            
+            try {
+                $tcpClient = New-Object System.Net.Sockets.TcpClient
+                $asyncResult = $tcpClient.BeginConnect($ScanHost, $Port, $null, $null)
+                $wait = $asyncResult.AsyncWaitHandle.WaitOne($Timeout, $false)
+                
+                if ($wait -and $tcpClient.Connected) {
+                    $tcpClient.EndConnect($asyncResult)
+                    $result.IsOpen = $true
+                }
+                $tcpClient.Close()
+                $tcpClient.Dispose()
+            }
+            catch {
+                # Port closed or filtered
+            }
+            
+            return $result
+        }
+        
+        # Launch all port scans in parallel
+        foreach ($portInfo in $cyberArkPorts) {
+            $powershell = [powershell]::Create()
+            [void]$powershell.AddScript($portScanScript)
+            [void]$powershell.AddArgument($targetHost)
+            [void]$powershell.AddArgument($portInfo.Port)
+            [void]$powershell.AddArgument($portInfo.Service)
+            [void]$powershell.AddArgument($portInfo.Expected)
+            [void]$powershell.AddArgument($portInfo.Severity)
+            [void]$powershell.AddArgument($timeout)
+            
+            $powershell.RunspacePool = $runspacePool
+            
+            $jobs += [PSCustomObject]@{
+                PowerShell = $powershell
+                Handle = $powershell.BeginInvoke()
+                PortInfo = $portInfo
+            }
+        }
+        
+        # Wait for all jobs to complete and collect results
+        $completedCount = 0
+        foreach ($job in $jobs) {
+            try {
+                $result = $job.PowerShell.EndInvoke($job.Handle)
+                if ($result) {
+                    Add-PortScanFinding -PortInfo $job.PortInfo -TargetHost $targetHost -IsOpen $result.IsOpen
+                }
+                $completedCount++
+            }
+            catch {
+                Write-AuditLog "Error scanning port $($job.PortInfo.Port): $($_.Exception.Message)" -Level Warning
+            }
+            finally {
+                $job.PowerShell.Dispose()
+            }
+        }
+        
+        $runspacePool.Close()
+        $runspacePool.Dispose()
+        
+        Write-AuditLog "Parallel port scan completed ($completedCount ports scanned)" -Level Info
+    }
+    else {
+        # Sequential scanning (original behavior) or PowerShell < 7
+        if ($ParallelExecution) {
+            Write-AuditLog "Parallel execution requested but PowerShell version < 7, falling back to async sequential..." -Level Warning
+        }
+        
+        # Use async with batch processing for better performance even in sequential mode
+        $batchSize = 10
+        $batches = @()
+        for ($i = 0; $i -lt $cyberArkPorts.Count; $i += $batchSize) {
+            $end = [Math]::Min($i + $batchSize - 1, $cyberArkPorts.Count - 1)
+            $batches += ,@($cyberArkPorts[$i..$end])
+        }
+        
+        foreach ($batch in $batches) {
+            # Start all connections in this batch asynchronously
+            $asyncConnections = @()
+            
+            foreach ($portInfo in $batch) {
+                try {
+                    $tcpClient = New-Object System.Net.Sockets.TcpClient
+                    $asyncResult = $tcpClient.BeginConnect($targetHost, $portInfo.Port, $null, $null)
+                    
+                    $asyncConnections += [PSCustomObject]@{
+                        TcpClient = $tcpClient
+                        AsyncResult = $asyncResult
+                        PortInfo = $portInfo
+                    }
+                }
+                catch {
+                    # Failed to initiate connection
+                }
+            }
+            
+            # Wait for all connections in batch to complete
+            foreach ($conn in $asyncConnections) {
+                try {
+                    $wait = $conn.AsyncResult.AsyncWaitHandle.WaitOne($timeout, $false)
+                    $isOpen = $wait -and $conn.TcpClient.Connected
+                    
+                    if ($isOpen) {
+                        $conn.TcpClient.EndConnect($conn.AsyncResult)
+                    }
+                    
+                    Add-PortScanFinding -PortInfo $conn.PortInfo -TargetHost $targetHost -IsOpen $isOpen
+                }
+                catch {
+                    # Port closed or filtered - expected for most ports
+                }
+                finally {
+                    $conn.TcpClient.Close()
+                    $conn.TcpClient.Dispose()
+                }
+            }
         }
     }
 }
@@ -18736,12 +19211,16 @@ function Export-JSONReport {
 
 #region Main Execution
 function Start-Audit {
+    # Initialize configuration from defaults, external file, and parameter overrides
+    Initialize-Configuration
+
     # Display detailed info unless suppressed with -NoLogo
     if (-not $NoLogo) {
         Write-Host ""
         Write-Host "  Target: $PVWA" -ForegroundColor White
         if ($Proxy) { Write-Host "  Proxy: $Proxy" -ForegroundColor Yellow }
         if ($OPSECMode) { Write-Host "  Mode: OPSEC/Stealth" -ForegroundColor Red }
+        if ($ConfigFile) { Write-Host "  Config: $ConfigFile" -ForegroundColor Cyan }
         Write-Host ""
     }
 
