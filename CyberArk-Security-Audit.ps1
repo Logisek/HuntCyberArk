@@ -75,7 +75,7 @@
 .EXAMPLE
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyAuthenticatedChecks -Credential $cred
     # Run only authenticated API checks
-.NOTES    
+.NOTES    "C:\Users\GeorgeKarpouzas\Downloads\screenshot.png"
     WARNING: Some tests (port scanning, CVE checks, WAF evasion) may trigger security alerts.
     Always obtain proper authorization before running this script.
     
@@ -1260,6 +1260,596 @@ function Clear-SensitiveData {
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
 }
+
+#region Improved Helper Functions
+
+<#
+.SYNOPSIS
+    Invokes a web request with automatic retry logic for transient failures
+.DESCRIPTION
+    Wraps Invoke-WebRequest with exponential backoff retry logic to handle
+    transient network failures, timeouts, and rate limiting (429) responses.
+
+    Retry behavior:
+    - Retries on: Timeout, ConnectionReset, 429 (rate limit), 502, 503, 504
+    - Does NOT retry on: 400, 401, 403, 404, 405 (these are legitimate responses)
+    - Uses exponential backoff: 1s, 2s, 4s between retries
+.PARAMETER Uri
+    The URI to request
+.PARAMETER Method
+    HTTP method (GET, POST, PUT, DELETE, etc.)
+.PARAMETER Headers
+    Optional hashtable of HTTP headers
+.PARAMETER Body
+    Optional request body
+.PARAMETER ContentType
+    Content-Type header value (default: application/json)
+.PARAMETER TimeoutSec
+    Request timeout in seconds (default: 10)
+.PARAMETER MaxRetries
+    Maximum number of retry attempts (default: 3)
+.PARAMETER RetryDelayBase
+    Base delay in seconds for exponential backoff (default: 1)
+.OUTPUTS
+    Hashtable with StatusCode, Content, Headers, Success, RetryCount
+.EXAMPLE
+    $result = Invoke-WebRequestWithRetry -Uri "https://api.example.com/data" -MaxRetries 3
+    if ($result.Success) { $data = $result.Content }
+#>
+function Invoke-WebRequestWithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [string]$Method = "GET",
+
+        [hashtable]$Headers = @{},
+
+        [object]$Body = $null,
+
+        [string]$ContentType = "application/json",
+
+        [int]$TimeoutSec = 10,
+
+        [int]$MaxRetries = 3,
+
+        [int]$RetryDelayBase = 1
+    )
+
+    # Status codes that indicate transient failures worth retrying
+    $retryStatusCodes = @(429, 502, 503, 504, 0)  # 0 = connection failed
+
+    $retryCount = 0
+    $lastError = $null
+    $lastStatusCode = 0
+
+    while ($retryCount -le $MaxRetries) {
+        try {
+            $params = @{
+                Uri             = $Uri
+                Method          = $Method
+                Headers         = $Headers
+                TimeoutSec      = $TimeoutSec
+                UseBasicParsing = $true
+                ErrorAction     = "Stop"
+            }
+
+            if ($Body) {
+                $params.Body = if ($Body -is [string]) { $Body } else { ($Body | ConvertTo-Json -Depth 10) }
+                $params.ContentType = $ContentType
+            }
+
+            # Handle certificate validation for PS 6+
+            if ($script:SkipCertCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
+                $params.SkipCertificateCheck = $true
+            }
+
+            $response = Invoke-WebRequest @params
+
+            return @{
+                StatusCode = $response.StatusCode
+                Content    = $response.Content
+                Headers    = $response.Headers
+                Success    = $true
+                RetryCount = $retryCount
+            }
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            $lastStatusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+
+            # Check if this is a retryable error
+            $isRetryable = $false
+
+            # Transient status codes
+            if ($lastStatusCode -in $retryStatusCodes) {
+                $isRetryable = $true
+            }
+
+            # Connection/timeout errors (status 0)
+            if ($lastError -match "timeout|timed out|connection.*reset|connection.*refused|network.*unreachable") {
+                $isRetryable = $true
+            }
+
+            if ($isRetryable -and $retryCount -lt $MaxRetries) {
+                $retryCount++
+                $delay = $RetryDelayBase * [Math]::Pow(2, $retryCount - 1)  # Exponential backoff
+                Write-AuditLog "Request to $Uri failed (attempt $retryCount/$MaxRetries): $lastError. Retrying in ${delay}s..." -Level Debug
+                Start-Sleep -Seconds $delay
+            }
+            else {
+                # Not retryable or max retries reached
+                break
+            }
+        }
+    }
+
+    # Return failure result
+    return @{
+        StatusCode = $lastStatusCode
+        Content    = $null
+        Headers    = $null
+        Success    = $false
+        Error      = $lastError
+        RetryCount = $retryCount
+    }
+}
+
+<#
+.SYNOPSIS
+    Tests a CVE endpoint with comprehensive validation to prevent false positives
+.DESCRIPTION
+    Consolidated function for testing CVE vulnerabilities that handles:
+    - Baseline response filtering (SPA catch-all pages)
+    - HTML vs JSON response validation
+    - Content pattern matching for vulnerability confirmation
+    - Automatic finding creation with PoC data
+
+    This function should be used instead of raw Invoke-WebRequest calls
+    in CVE check functions to ensure consistent false positive prevention.
+.PARAMETER Uri
+    The full URI to test
+.PARAMETER Method
+    HTTP method (default: GET)
+.PARAMETER Headers
+    Optional hashtable of HTTP headers to send
+.PARAMETER Body
+    Optional request body
+.PARAMETER ContentType
+    Content-Type header (default: application/json)
+.PARAMETER VulnerabilityPatterns
+    Array of regex patterns that indicate the vulnerability exists.
+    At least one must match for vulnerability to be confirmed.
+.PARAMETER FalsePositivePatterns
+    Array of regex patterns that indicate a false positive.
+    If any match, the check returns not vulnerable.
+.PARAMETER RequireJSON
+    If $true, response must be valid JSON to be considered vulnerable
+.PARAMETER RequireNonHTML
+    If $true, HTML responses are automatically filtered as false positives
+.PARAMETER CVEId
+    The CVE identifier (e.g., "CVE-2021-31796") for logging
+.OUTPUTS
+    Hashtable with:
+    - IsVulnerable: Boolean indicating if vulnerability was confirmed
+    - Response: The web response object
+    - Content: Response body content
+    - MatchedPattern: The pattern that matched (if vulnerable)
+    - Reason: Why the check passed/failed (for debugging)
+.EXAMPLE
+    $result = Test-CVEEndpoint -Uri "$PVWA/api/vulnerable" -VulnerabilityPatterns @('"secret":', '"password":')
+    if ($result.IsVulnerable) {
+        Add-Finding -Finding "Vulnerability confirmed" -Resource $Uri ...
+    }
+#>
+function Test-CVEEndpoint {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [string]$Method = "GET",
+
+        [hashtable]$Headers = @{},
+
+        [object]$Body = $null,
+
+        [string]$ContentType = "application/json",
+
+        [string[]]$VulnerabilityPatterns = @(),
+
+        [string[]]$FalsePositivePatterns = @(),
+
+        [switch]$RequireJSON,
+
+        [switch]$RequireNonHTML,
+
+        [string]$CVEId = ""
+    )
+
+    $result = @{
+        IsVulnerable   = $false
+        Response       = $null
+        Content        = $null
+        MatchedPattern = $null
+        Reason         = "Not tested"
+        StatusCode     = 0
+    }
+
+    try {
+        # Make the request with retry logic
+        $response = Invoke-WebRequestWithRetry -Uri $Uri -Method $Method -Headers $Headers -Body $Body -ContentType $ContentType -TimeoutSec 10 -MaxRetries 2
+
+        if (-not $response.Success) {
+            $result.Reason = "Request failed: $($response.Error)"
+            $result.StatusCode = $response.StatusCode
+            return $result
+        }
+
+        $result.Response = $response
+        $result.Content = $response.Content
+        $result.StatusCode = $response.StatusCode
+        $content = $response.Content
+
+        # Check 1: Skip baseline/catch-all responses
+        if (Test-IsBaselineResponse -ResponseContent $content) {
+            $result.Reason = "Filtered: Baseline/catch-all response detected"
+            return $result
+        }
+
+        # Check 2: Skip HTML responses if RequireNonHTML
+        if ($RequireNonHTML -and $content -match "<!DOCTYPE|<html|<head|<body") {
+            $result.Reason = "Filtered: HTML response (RequireNonHTML)"
+            return $result
+        }
+
+        # Check 3: Require JSON if specified
+        if ($RequireJSON -and $content -notmatch '^\s*[\{\[]') {
+            $result.Reason = "Filtered: Not JSON (RequireJSON)"
+            return $result
+        }
+
+        # Check 4: Check for false positive patterns
+        foreach ($pattern in $FalsePositivePatterns) {
+            if ($content -match $pattern) {
+                $result.Reason = "Filtered: False positive pattern matched: $pattern"
+                return $result
+            }
+        }
+
+        # Check 5: Check for vulnerability patterns
+        if ($VulnerabilityPatterns.Count -gt 0) {
+            foreach ($pattern in $VulnerabilityPatterns) {
+                if ($content -match $pattern) {
+                    $result.IsVulnerable = $true
+                    $result.MatchedPattern = $pattern
+                    $result.Reason = "Vulnerable: Pattern matched - $pattern"
+                    return $result
+                }
+            }
+            $result.Reason = "Not vulnerable: No vulnerability patterns matched"
+        }
+        else {
+            # No patterns specified - just return successful response
+            $result.IsVulnerable = $true
+            $result.Reason = "Endpoint accessible (no patterns specified)"
+        }
+    }
+    catch {
+        $result.Reason = "Error: $($_.Exception.Message)"
+        Write-AuditLog "Error testing $CVEId on ${Uri}: $($_.Exception.Message)" -Level Debug
+    }
+
+    return $result
+}
+
+<#
+.SYNOPSIS
+    Tests multiple endpoints in parallel for improved performance
+.DESCRIPTION
+    Uses PowerShell runspaces to test multiple endpoints concurrently.
+    This significantly speeds up scans when testing many endpoints.
+
+    Features:
+    - Configurable thread pool size (default: 10)
+    - Automatic load balancing across threads
+    - Results aggregation with original endpoint context
+    - Timeout handling for slow endpoints
+.PARAMETER Endpoints
+    Array of endpoint objects, each containing:
+    - Uri: The full URI to test
+    - Method: HTTP method (optional, default GET)
+    - Headers: Hashtable of headers (optional)
+    - Body: Request body (optional)
+    - Context: Any additional context to return with results
+.PARAMETER ScriptBlock
+    The script block to execute for each endpoint.
+    Receives $endpoint as parameter, should return a result object.
+.PARAMETER ThrottleLimit
+    Maximum concurrent threads (default: 10)
+.PARAMETER TimeoutSeconds
+    Timeout for each endpoint test (default: 30)
+.OUTPUTS
+    Array of result objects from the ScriptBlock, each with:
+    - Endpoint: The original endpoint object
+    - Result: The result from ScriptBlock
+    - Success: Boolean indicating if test completed
+    - Error: Error message if failed
+.EXAMPLE
+    $endpoints = @(
+        @{ Uri = "https://example.com/api1"; Context = "Test1" },
+        @{ Uri = "https://example.com/api2"; Context = "Test2" }
+    )
+    $results = Invoke-ParallelEndpointTest -Endpoints $endpoints -ScriptBlock {
+        param($endpoint)
+        Invoke-WebRequest -Uri $endpoint.Uri -Method GET -UseBasicParsing -TimeoutSec 5
+    }
+#>
+function Invoke-ParallelEndpointTest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Endpoints,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$ScriptBlock,
+
+        [int]$ThrottleLimit = 10,
+
+        [int]$TimeoutSeconds = 30
+    )
+
+    # For small numbers of endpoints, just run sequentially
+    if ($Endpoints.Count -le 2) {
+        $results = @()
+        foreach ($endpoint in $Endpoints) {
+            try {
+                $result = & $ScriptBlock $endpoint
+                $results += @{
+                    Endpoint = $endpoint
+                    Result   = $result
+                    Success  = $true
+                    Error    = $null
+                }
+            }
+            catch {
+                $results += @{
+                    Endpoint = $endpoint
+                    Result   = $null
+                    Success  = $false
+                    Error    = $_.Exception.Message
+                }
+            }
+        }
+        return $results
+    }
+
+    # Use runspace pool for parallel execution
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, $ThrottleLimit)
+    $runspacePool.Open()
+
+    $runspaces = @()
+    $results = @()
+
+    try {
+        # Create runspaces for each endpoint
+        foreach ($endpoint in $Endpoints) {
+            $powershell = [powershell]::Create().AddScript({
+                param($endpoint, $scriptBlock, $timeout)
+
+                try {
+                    $result = & $scriptBlock $endpoint
+                    return @{
+                        Endpoint = $endpoint
+                        Result   = $result
+                        Success  = $true
+                        Error    = $null
+                    }
+                }
+                catch {
+                    return @{
+                        Endpoint = $endpoint
+                        Result   = $null
+                        Success  = $false
+                        Error    = $_.Exception.Message
+                    }
+                }
+            }).AddArgument($endpoint).AddArgument($ScriptBlock).AddArgument($TimeoutSeconds)
+
+            $powershell.RunspacePool = $runspacePool
+
+            $runspaces += @{
+                PowerShell = $powershell
+                Handle     = $powershell.BeginInvoke()
+                Endpoint   = $endpoint
+            }
+        }
+
+        # Collect results with timeout
+        $timeout = [datetime]::Now.AddSeconds($TimeoutSeconds + 10)
+
+        foreach ($runspace in $runspaces) {
+            try {
+                $remainingTime = ($timeout - [datetime]::Now).TotalMilliseconds
+                if ($remainingTime -gt 0) {
+                    if ($runspace.Handle.AsyncWaitHandle.WaitOne([int]$remainingTime)) {
+                        $result = $runspace.PowerShell.EndInvoke($runspace.Handle)
+                        $results += $result
+                    }
+                    else {
+                        $results += @{
+                            Endpoint = $runspace.Endpoint
+                            Result   = $null
+                            Success  = $false
+                            Error    = "Timeout"
+                        }
+                    }
+                }
+            }
+            catch {
+                $results += @{
+                    Endpoint = $runspace.Endpoint
+                    Result   = $null
+                    Success  = $false
+                    Error    = $_.Exception.Message
+                }
+            }
+            finally {
+                $runspace.PowerShell.Dispose()
+            }
+        }
+    }
+    finally {
+        $runspacePool.Close()
+        $runspacePool.Dispose()
+    }
+
+    return $results
+}
+
+<#
+.SYNOPSIS
+    Tests multiple URIs for a specific vulnerability pattern in parallel
+.DESCRIPTION
+    Convenience wrapper around Invoke-ParallelEndpointTest specifically
+    designed for CVE testing. Tests multiple endpoints for the same
+    vulnerability pattern and returns findings.
+.PARAMETER BaseUri
+    The base URI (e.g., PVWA URL)
+.PARAMETER Endpoints
+    Array of endpoint paths to test (will be appended to BaseUri)
+.PARAMETER VulnerabilityPatterns
+    Regex patterns indicating vulnerability
+.PARAMETER FalsePositivePatterns
+    Regex patterns indicating false positive
+.PARAMETER Method
+    HTTP method (default: GET)
+.PARAMETER Headers
+    Optional headers hashtable
+.PARAMETER RequireJSON
+    If true, require JSON response
+.PARAMETER ThrottleLimit
+    Max concurrent tests (default: 5)
+.OUTPUTS
+    Array of vulnerable endpoints with details
+.EXAMPLE
+    $vulnerable = Test-EndpointsParallel -BaseUri $PVWA -Endpoints @("/api/v1", "/api/v2") `
+        -VulnerabilityPatterns @('"secret":')
+#>
+function Test-EndpointsParallel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BaseUri,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Endpoints,
+
+        [string[]]$VulnerabilityPatterns = @(),
+
+        [string[]]$FalsePositivePatterns = @(),
+
+        [string]$Method = "GET",
+
+        [hashtable]$Headers = @{},
+
+        [switch]$RequireJSON,
+
+        [int]$ThrottleLimit = 5
+    )
+
+    # Build endpoint objects
+    $endpointObjects = $Endpoints | ForEach-Object {
+        @{
+            Uri      = "$BaseUri$_"
+            Path     = $_
+            Method   = $Method
+            Headers  = $Headers
+        }
+    }
+
+    # Define the test script
+    $testScript = {
+        param($endpoint)
+
+        try {
+            $params = @{
+                Uri             = $endpoint.Uri
+                Method          = $endpoint.Method
+                Headers         = $endpoint.Headers
+                UseBasicParsing = $true
+                TimeoutSec      = 10
+                ErrorAction     = "Stop"
+            }
+
+            $response = Invoke-WebRequest @params
+
+            return @{
+                StatusCode = $response.StatusCode
+                Content    = $response.Content
+                Success    = $true
+            }
+        }
+        catch {
+            return @{
+                StatusCode = 0
+                Content    = $null
+                Success    = $false
+                Error      = $_.Exception.Message
+            }
+        }
+    }
+
+    # Run parallel tests
+    $rawResults = Invoke-ParallelEndpointTest -Endpoints $endpointObjects -ScriptBlock $testScript -ThrottleLimit $ThrottleLimit
+
+    # Process results and check for vulnerabilities
+    $vulnerableEndpoints = @()
+
+    foreach ($rawResult in $rawResults) {
+        if (-not $rawResult.Success -or -not $rawResult.Result.Success) {
+            continue
+        }
+
+        $content = $rawResult.Result.Content
+        $endpoint = $rawResult.Endpoint
+
+        # Skip baseline responses
+        if (Test-IsBaselineResponse -ResponseContent $content) {
+            continue
+        }
+
+        # Skip HTML if RequireJSON
+        if ($RequireJSON -and $content -match "<!DOCTYPE|<html") {
+            continue
+        }
+
+        # Check false positive patterns
+        $isFalsePositive = $false
+        foreach ($pattern in $FalsePositivePatterns) {
+            if ($content -match $pattern) {
+                $isFalsePositive = $true
+                break
+            }
+        }
+        if ($isFalsePositive) { continue }
+
+        # Check vulnerability patterns
+        foreach ($pattern in $VulnerabilityPatterns) {
+            if ($content -match $pattern) {
+                $vulnerableEndpoints += @{
+                    Uri            = $endpoint.Uri
+                    Path           = $endpoint.Path
+                    StatusCode     = $rawResult.Result.StatusCode
+                    MatchedPattern = $pattern
+                    Content        = $content.Substring(0, [Math]::Min(500, $content.Length))
+                }
+                break
+            }
+        }
+    }
+
+    return $vulnerableEndpoints
+}
+
+#endregion Improved Helper Functions
 
 function Write-AuditLog {
     param(
@@ -3436,6 +4026,23 @@ function Test-ExposedEndpoints {
 
     foreach ($endpoint in $sensitiveEndpoints) {
         try {
+            # First check if endpoint redirects (302/301) - treat as non-existent on Privilege Cloud
+            $endpointExists = $true
+            try {
+                $redirectCheck = Invoke-WebRequest -Uri "$PVWA$($endpoint.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+            }
+            catch {
+                $redirectStatus = $_.Exception.Response.StatusCode.value__
+                if ($redirectStatus -eq 302 -or $redirectStatus -eq 301) {
+                    Write-AuditLog "Skipping $($endpoint.Path) - endpoint redirects (not available on this platform)" -Level Debug
+                    $endpointExists = $false
+                }
+            }
+
+            if (-not $endpointExists) {
+                continue
+            }
+
             # Use -SkipHttpErrorCheck (PowerShell 6+) to get all responses without exceptions
             # This ensures we can properly check status codes for 404, 401, 403, etc.
             $invokeParams = @{
@@ -3465,7 +4072,13 @@ function Test-ExposedEndpoints {
                 continue
             }
 
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+            # Skip 3xx redirect responses - endpoint doesn't truly exist, it just redirects to login
+            if ($response.StatusCode -ge 300 -and $response.StatusCode -lt 400) {
+                Write-AuditLog "Skipping $($endpoint.Path) - received HTTP $($response.StatusCode) redirect (not a real endpoint)" -Level Debug
+                continue
+            }
+
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
                 $body = $response.Content
 
                 # Check for baseline catch-all response (CyberArk SPA returns same page for all URLs)
@@ -3831,10 +4444,37 @@ function Test-CookieSecurity {
     Write-AuditLog "Checking cookie security attributes (Blackbox)..." -Level Info
 
     try {
-        # Make a request that would set cookies
-        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -UseBasicParsing -TimeoutSec 10 -SessionVariable session -ErrorAction SilentlyContinue
+        # Try multiple endpoints - some may redirect but we follow to the actual login page
+        $cookieTestEndpoints = @(
+            "$PVWA/",
+            "$PVWA/PasswordVault/",
+            "$PVWA/identity/"
+        )
 
-        if ($session.Cookies.Count -gt 0) {
+        $response = $null
+        $session = $null
+        $testedEndpoint = ""
+
+        foreach ($testUrl in $cookieTestEndpoints) {
+            try {
+                $response = Invoke-WebRequest -Uri $testUrl -Method GET -UseBasicParsing -TimeoutSec 10 -SessionVariable sessionTemp -ErrorAction Stop
+                if ($sessionTemp.Cookies.Count -gt 0 -or $response.Headers["Set-Cookie"]) {
+                    $session = $sessionTemp
+                    $testedEndpoint = $testUrl
+                    break
+                }
+            }
+            catch {
+                # Try next endpoint
+            }
+        }
+
+        if (-not $session -and -not $response) {
+            Write-AuditLog "Could not retrieve cookies from any endpoint" -Level Debug
+            return
+        }
+
+        if ($session -and $session.Cookies.Count -gt 0) {
             foreach ($cookie in $session.Cookies.GetCookies("$PVWA")) {
                 $issues = @()
 
@@ -3892,7 +4532,7 @@ function Test-CookieSecurity {
                         -Recommendation "Configure secure cookie attributes" `
                         -Severity "Medium" `
                         -RequestMethod "GET" `
-                        -RequestURL "$PVWA/PasswordVault/" `
+                        -RequestURL $testedEndpoint `
                         -RequestHeaders @{ "Host" = ([System.Uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit/1.0" } `
                         -ResponseStatus $response.StatusCode `
                         -ResponseHeaders $respHeaders `
@@ -4009,6 +4649,23 @@ function Test-BackupAndConfigFiles {
 
     foreach ($file in $sensitiveFiles) {
         try {
+            # First check if endpoint redirects (302/301) - treat as non-existent
+            $fileExists = $true
+            try {
+                $redirectCheck = Invoke-WebRequest -Uri "$PVWA$($file.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+            }
+            catch {
+                $redirectStatus = $_.Exception.Response.StatusCode.value__
+                if ($redirectStatus -eq 302 -or $redirectStatus -eq 301) {
+                    Write-AuditLog "Skipping $($file.Path) - endpoint redirects (not available)" -Level Debug
+                    $fileExists = $false
+                }
+            }
+
+            if (-not $fileExists) {
+                continue
+            }
+
             $response = Invoke-WebRequest -Uri "$PVWA$($file.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
@@ -4230,16 +4887,22 @@ function Test-RateLimiting {
     $validEndpoint = $null
     $endpointStatusCode = 0
 
-    # First, find a valid login endpoint (one that doesn't return 404)
+    # First, find a valid login endpoint (one that doesn't redirect or return 404)
     foreach ($endpoint in $loginEndpoints) {
         try {
-            $testResponse = Invoke-WebRequest -Uri $endpoint -Method POST -Body '{}' -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            # Use MaximumRedirection 0 to detect if endpoint redirects (doesn't exist on Privilege Cloud)
+            $testResponse = Invoke-WebRequest -Uri $endpoint -Method POST -Body '{}' -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
             $endpointStatusCode = $testResponse.StatusCode
             $validEndpoint = $endpoint
             break
         }
         catch {
             $statusCode = $_.Exception.Response.StatusCode.value__
+            # 302/301 redirect means endpoint doesn't exist on this platform - skip
+            if ($statusCode -eq 302 -or $statusCode -eq 301) {
+                Write-AuditLog "Rate limiting endpoint $endpoint redirects - not available on this platform" -Level Debug
+                continue
+            }
             # 400, 401, 403 indicate the endpoint exists but requires proper auth
             if ($statusCode -eq 400 -or $statusCode -eq 401 -or $statusCode -eq 403) {
                 $validEndpoint = $endpoint
@@ -4253,7 +4916,7 @@ function Test-RateLimiting {
     if (-not $validEndpoint) {
         Add-SkippedCheck -Category "Rate Limiting" -CISControl "BB10" `
             -CheckName "Rate Limiting Check" `
-            -Reason "No valid login endpoint found (all returned 404 - may be CyberArk Identity/Cloud with different auth flow)" `
+            -Reason "No valid login endpoint found (all endpoints redirect or returned 404 - may be CyberArk Identity/Cloud with different auth flow)" `
             -Type "NotApplicable"
         return
     }
@@ -5053,6 +5716,10 @@ $($Analysis.Description)
                             ($analysis.FlagsUsed -join "; ")
                         ) -join "`n"
                         
+                        # Build PoC response headers
+                        $pocRespHeaders = @{}
+                        foreach ($h in $response.Headers.Keys) { $pocRespHeaders[$h] = $response.Headers[$h] -join ", " }
+
                         Add-Finding -Category "CVE Assessment" `
                             -CISControl "CVE1" `
                             -Finding "CVE-2021-31796: EXPLOITABLE - Credential file exposed via web" `
@@ -5060,8 +5727,14 @@ $($Analysis.Description)
                             -CurrentValue $currentValue `
                             -ExpectedValue "Credential files must NEVER be web-accessible. These files contain encrypted passwords that can be decrypted offline." `
                             -Recommendation "IMMEDIATE ACTION REQUIRED: (1) Remove credential file from web directory, (2) Rotate ALL credentials for user '$($parsed.Username)', (3) Review IIS/web server configuration, (4) Upgrade to CyberArk v12.1+, (5) Recreate credential files with -DisplayRestrictions to hide field values." `
-                            -Severity "Critical"
-                        
+                            -Severity "Critical" `
+                            -RequestMethod "GET" `
+                            -RequestURL $uri `
+                            -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                            -ResponseStatus $response.StatusCode `
+                            -ResponseHeaders $pocRespHeaders `
+                            -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)) + "... [CREDENTIAL FILE CONTENT - TRUNCATED]")
+
                         # Additional finding if trivially exploitable
                         if ($analysis.Exploitability -in @("TRIVIAL", "EASY")) {
                             Add-Finding -Category "CVE Assessment" `
@@ -5071,11 +5744,20 @@ $($Analysis.Description)
                                 -CurrentValue "Effective key space: 2^$($analysis.EffectiveKeySpaceBits). $($analysis.Description)" `
                                 -ExpectedValue "Encryption key should require brute-force attack with significant compute resources" `
                                 -Recommendation "ASSUME CREDENTIAL IS COMPROMISED. Immediately: (1) Disable account '$($parsed.Username)' in the Vault, (2) Rotate any secrets this account can access, (3) Check audit logs for unauthorized access." `
-                                -Severity "Critical"
+                                -Severity "Critical" `
+                                -RequestMethod "GET" `
+                                -RequestURL $uri `
+                                -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                                -ResponseStatus $response.StatusCode `
+                                -ResponseHeaders $pocRespHeaders `
+                                -ResponseBody "Credential file exploitability analysis: $($analysis.Description)"
                         }
                     }
                     else {
-                        # Could parse file but not VerificationsFlag
+                        # Could parse file but not VerificationsFlag - build PoC
+                        $pocRespHeaders = @{}
+                        foreach ($h in $response.Headers.Keys) { $pocRespHeaders[$h] = $response.Headers[$h] -join ", " }
+
                         Add-Finding -Category "CVE Assessment" `
                             -CISControl "CVE1" `
                             -Finding "CVE-2021-31796: Credential file exposed (parse error on flags)" `
@@ -5083,11 +5765,20 @@ $($Analysis.Description)
                             -CurrentValue "Credential file accessible but could not parse VerificationsFlag. Raw content may still be exploitable." `
                             -ExpectedValue "Credential files must not be web-accessible" `
                             -Recommendation "URGENT: Remove credential file from web directory immediately. Rotate all associated credentials." `
-                            -Severity "Critical"
+                            -Severity "Critical" `
+                            -RequestMethod "GET" `
+                            -RequestURL $uri `
+                            -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                            -ResponseStatus $response.StatusCode `
+                            -ResponseHeaders $pocRespHeaders `
+                            -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)) + "...")
                     }
                 }
                 elseif ($content -match "CredFileVersion=" -or $content -match "Password=") {
-                    # Partial match - might be version 1 or malformed
+                    # Partial match - might be version 1 or malformed - build PoC
+                    $pocRespHeaders = @{}
+                    foreach ($h in $response.Headers.Keys) { $pocRespHeaders[$h] = $response.Headers[$h] -join ", " }
+
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE1" `
                         -Finding "Potential credential file detected (non-standard format)" `
@@ -5095,7 +5786,13 @@ $($Analysis.Description)
                         -CurrentValue "File contains credential markers but may be version 1 or custom format" `
                         -ExpectedValue "No credential files should be web-accessible" `
                         -Recommendation "Investigate file contents. Remove from web directory if it contains credentials." `
-                        -Severity "High"
+                        -Severity "High" `
+                        -RequestMethod "GET" `
+                        -RequestURL $uri `
+                        -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocRespHeaders `
+                        -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)) + "...")
                 }
             }
         }
@@ -5623,7 +6320,13 @@ function Test-AdditionalCVEs {
                     -CurrentValue "SAML endpoint responding with SAML-specific errors - verify version > 10.7" `
                     -ExpectedValue "Patched against XXE or SAML disabled if unused" `
                     -Recommendation "Verify CyberArk version is patched against CVE-2019-7442. If SAML is not used, disable the endpoint." `
-                    -Severity "Medium"
+                    -Severity "Medium" `
+                    -RequestMethod "POST" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -RequestHeaders @{ "Content-Type" = "application/x-www-form-urlencoded" } `
+                    -RequestBody $postBody `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($responseBody.Substring(0, [Math]::Min(500, $responseBody.Length)))
             }
         }
         catch { }
@@ -5731,7 +6434,12 @@ function Test-CVE2025EPM {
                         -CurrentValue "EPM endpoint accessible with spoofed headers - audit logs may record spoofed IPs" `
                         -ExpectedValue "X-Forwarded-For headers validated against trusted proxies only" `
                         -Recommendation "Configure EPM to only trust X-Forwarded-For from known reverse proxies. Apply patches for CVE-2025-22271." `
-                        -Severity "Medium"
+                        -Severity "Medium" `
+                        -RequestMethod "GET" `
+                        -RequestURL "$epmBase$ep" `
+                        -RequestHeaders $spoofHeaders `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                     break
                 }
             }
@@ -5828,7 +6536,13 @@ function Test-CVE2025EPM {
                             -CurrentValue "5 requests completed in avg ${avgTime}ms each - no throttling detected" `
                             -ExpectedValue "Rate limiting, account lockout, or CAPTCHA implemented" `
                             -Recommendation "Implement rate limiting on $endpoint. Apply patches for CVE-2025-22273." `
-                            -Severity "Medium"
+                            -Severity "Medium" `
+                            -RequestMethod "POST" `
+                            -RequestURL "$epmBase$endpoint" `
+                            -RequestHeaders @{ "Content-Type" = "application/json" } `
+                            -RequestBody $testBody `
+                            -ResponseStatus 200 `
+                            -ResponseBody "5 rapid password change requests completed without rate limiting. Average response time: ${avgTime}ms"
                         break
                     }
                 }
@@ -5869,7 +6583,10 @@ function Test-CVE2025EPM {
                         -Severity "Medium" `
                         -RequestMethod "POST" `
                         -RequestURL "$epmBase$($ep.Path)" `
-                        -ResponseStatus $response.StatusCode
+                        -RequestHeaders @{ "Content-Type" = $ep.ContentType } `
+                        -RequestBody $ep.Body `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                     break
                 }
             }
@@ -5910,7 +6627,10 @@ function Test-CVE2025EPM {
                         -Severity "Medium" `
                         -RequestMethod "POST" `
                         -RequestURL "$epmBase$($ep.Path)" `
-                        -ResponseStatus $response.StatusCode
+                        -RequestHeaders @{ "Content-Type" = "application/json" } `
+                        -RequestBody $ep.Body `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                     break
                 }
             }
@@ -5967,7 +6687,11 @@ function Test-CVE2025SecretsManager {
                                 -CurrentValue "Authenticator endpoint responds with API data - verify IAM configuration is secure" `
                                 -ExpectedValue "Authenticators properly configured and secured" `
                                 -Recommendation "Review IAM authenticator configuration and apply patches for CVE-2025-49827" `
-                                -Severity "High"
+                                -Severity "High" `
+                                -RequestMethod "GET" `
+                                -RequestURL "https://${pvwaHost}:${port}$endpoint" `
+                                -ResponseStatus $response.StatusCode `
+                                -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                         }
                     }
                     catch { }
@@ -5997,7 +6721,13 @@ function Test-CVE2025SecretsManager {
                     -CurrentValue "Command injection patterns may be processed" `
                     -ExpectedValue "Input properly sanitized" `
                     -Recommendation "Apply security patches for CVE-2025-49828 immediately" `
-                    -Severity "Critical"
+                    -Severity "Critical" `
+                    -RequestMethod $payload.Method `
+                    -RequestURL "$PVWA$($payload.Path)" `
+                    -RequestHeaders @{ "Content-Type" = "application/json" } `
+                    -RequestBody $payload.Body `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($response.Content.Substring(0, [Math]::Min(500, $response.Content.Length)))
             }
         }
         catch { }
@@ -6041,7 +6771,11 @@ function Test-CVE2025SecretsManager {
                     -CurrentValue "Endpoint accessible: $($body.Substring(0, [Math]::Min(100, $body.Length)))..." `
                     -ExpectedValue "Internal endpoints not accessible externally" `
                     -Recommendation "Review network segmentation and apply CVE-2025-49831 patches" `
-                    -Severity "High"
+                    -Severity "High" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
             }
         }
         catch { }
@@ -6076,7 +6810,11 @@ function Test-CVE2025SecretsManager {
                         -CurrentValue "Payload: $($payload.Desc) - File contents disclosed" `
                         -ExpectedValue "Path traversal blocked" `
                         -Recommendation "Apply patches for CVE-2025-49830 immediately - file disclosure vulnerability" `
-                        -Severity "High"
+                        -Severity "High" `
+                        -RequestMethod "GET" `
+                        -RequestURL "$PVWA$($payload.Path)" `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                 }
             }
         }
@@ -6108,7 +6846,13 @@ function Test-CVE2025SecretsManager {
                     -CurrentValue "Accepted invalid input: $($payload.Desc)" `
                     -ExpectedValue "Invalid input rejected with 400 Bad Request" `
                     -Recommendation "Apply patches for CVE-2025-49829 - ensure proper input validation" `
-                    -Severity "Medium"
+                    -Severity "Medium" `
+                    -RequestMethod $payload.Method `
+                    -RequestURL "$PVWA$($payload.Path)" `
+                    -RequestHeaders @{ "Content-Type" = "application/json" } `
+                    -RequestBody $payload.Body `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody "Server accepted invalid input without proper validation"
             }
         }
         catch {
@@ -6121,7 +6865,13 @@ function Test-CVE2025SecretsManager {
                     -CurrentValue "Server returned 500 on: $($payload.Desc)" `
                     -ExpectedValue "Proper validation with 400 Bad Request" `
                     -Recommendation "Apply patches for CVE-2025-49829 - validate input before processing" `
-                    -Severity "Medium"
+                    -Severity "Medium" `
+                    -RequestMethod $payload.Method `
+                    -RequestURL "$PVWA$($payload.Path)" `
+                    -RequestHeaders @{ "Content-Type" = "application/json" } `
+                    -RequestBody $payload.Body `
+                    -ResponseStatus 500 `
+                    -ResponseBody "Server returned 500 Internal Server Error on invalid input - indicates missing validation"
             }
         }
     }
@@ -6156,7 +6906,11 @@ function Test-CVE202457967 {
                         -CurrentValue "LDAP directory configuration exposed" `
                         -ExpectedValue "Endpoint restricted to high-privilege users only" `
                         -Recommendation "Upgrade to PVWA 14.4+ and restrict LDAP configuration access to administrators" `
-                        -Severity "Medium"
+                        -Severity "Medium" `
+                        -RequestMethod "GET" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                 }
             }
         }
@@ -6493,9 +7247,11 @@ function Test-SecurityHeaders {
 
     foreach ($endpoint in $testEndpoints) {
         try {
+            # For security headers, we want to check the actual page users see (even after redirect)
+            # So we follow redirects and check headers on the final destination (login page)
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
-            if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 302) {
+            if ($response -and $response.StatusCode -eq 200) {
                 $missingHeaders = @()
 
                 foreach ($header in $requiredHeaders.Keys) {
@@ -6505,6 +7261,12 @@ function Test-SecurityHeaders {
                 }
 
                 if ($missingHeaders.Count -gt 0) {
+                    # Build PoC response headers for evidence
+                    $pocResponseHeaders = @{}
+                    foreach ($h in $response.Headers.Keys) {
+                        $pocResponseHeaders[$h] = $response.Headers[$h] -join ", "
+                    }
+
                     # Report high severity missing headers individually
                     foreach ($missing in $missingHeaders) {
                         $headerInfo = $requiredHeaders[$missing]
@@ -6516,7 +7278,13 @@ function Test-SecurityHeaders {
                                 -CurrentValue "Header not present" `
                                 -ExpectedValue "$missing header configured" `
                                 -Recommendation $headerInfo.Recommendation `
-                                -Severity $headerInfo.Severity
+                                -Severity $headerInfo.Severity `
+                                -RequestMethod "GET" `
+                                -RequestURL "$PVWA$endpoint" `
+                                -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                                -ResponseStatus $response.StatusCode `
+                                -ResponseHeaders $pocResponseHeaders `
+                                -ResponseBody "Response headers do not include: $missing"
                         }
                     }
 
@@ -6529,7 +7297,13 @@ function Test-SecurityHeaders {
                             -CurrentValue "Missing: $($missingHeaders -join ', ')" `
                             -ExpectedValue "All security headers configured" `
                             -Recommendation "Review OWASP Secure Headers guidelines" `
-                            -Severity "Medium"
+                            -Severity "Medium" `
+                            -RequestMethod "GET" `
+                            -RequestURL "$PVWA$endpoint" `
+                            -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit" } `
+                            -ResponseStatus $response.StatusCode `
+                            -ResponseHeaders $pocResponseHeaders `
+                            -ResponseBody "Response is missing the following security headers: $($missingHeaders -join ', ')"
                     }
                 }
 
@@ -6813,7 +7587,34 @@ function Test-APISecurityIssues {
         "/PasswordVault/WebServices/auth/Cyberark/CyberArkAuthenticationService.svc/Logon"
     )
 
+    $validRateLimitEndpoint = $null
+
+    # First, find a valid auth endpoint (one that doesn't redirect - means it exists)
     foreach ($endpoint in $rateLimitEndpoints) {
+        try {
+            # Use MaximumRedirection 0 to detect if endpoint redirects (doesn't exist)
+            $testBody = '{"username":"test","password":"test"}'
+            $testResponse = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+            $validRateLimitEndpoint = $endpoint
+            break
+        }
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            # 302/301 redirect means endpoint doesn't exist on this platform - skip
+            if ($statusCode -eq 302 -or $statusCode -eq 301) {
+                Write-AuditLog "API rate limiting endpoint $endpoint redirects - not available on this platform" -Level Debug
+                continue
+            }
+            # 400, 401, 403 indicate the endpoint exists but requires proper auth
+            if ($statusCode -eq 400 -or $statusCode -eq 401 -or $statusCode -eq 403) {
+                $validRateLimitEndpoint = $endpoint
+                break
+            }
+            # 404 means endpoint doesn't exist, try next one
+        }
+    }
+
+    if ($validRateLimitEndpoint) {
         try {
             $responses = @()
             $testBody = '{"username":"ratelimit_test","password":"test123"}'
@@ -6821,31 +7622,59 @@ function Test-APISecurityIssues {
             for ($i = 0; $i -lt 10; $i++) {
                 $start = Get-Date
                 try {
-                    $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 3 -ErrorAction SilentlyContinue
+                    $response = Invoke-WebRequest -Uri "$PVWA$validRateLimitEndpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
                     $responses += @{ StatusCode = $response.StatusCode; Time = ((Get-Date) - $start).TotalMilliseconds }
                 }
                 catch {
-                    $responses += @{ StatusCode = 401; Time = ((Get-Date) - $start).TotalMilliseconds }
+                    # Capture the actual status code from the exception response
+                    $actualStatusCode = 0
+                    if ($_.Exception.Response) {
+                        $actualStatusCode = [int]$_.Exception.Response.StatusCode
+                    }
+                    elseif ($_.Exception.Message -match "(\d{3})") {
+                        $actualStatusCode = [int]$Matches[1]
+                    }
+                    else {
+                        $actualStatusCode = 401  # Default assumption for auth failure
+                    }
+                    $responses += @{ StatusCode = $actualStatusCode; Time = ((Get-Date) - $start).TotalMilliseconds }
                 }
             }
 
             # If all 10 requests completed without 429 or significant delay
             $avgTime = ($responses | Measure-Object -Property Time -Average).Average
             $got429 = $responses | Where-Object { $_.StatusCode -eq 429 }
+            $gotRateLimited = $responses | Where-Object { $_.StatusCode -in @(429, 503) -or $_.Time -gt 2000 }
 
-            if (-not $got429 -and $responses.Count -eq 10 -and $avgTime -lt 1000) {
+            # Rate limiting should trigger 429 or progressive delays - if neither, it's missing
+            if (-not $gotRateLimited -and $responses.Count -eq 10 -and $avgTime -lt 1000) {
+                # Build response summary for PoC with ACTUAL status codes
+                $responsesSummary = $responses | ForEach-Object { "Request: StatusCode=$($_.StatusCode), Time=$([math]::Round($_.Time))ms" }
+
+                # Get most common status code for the response summary
+                $mostCommonStatus = ($responses | Group-Object StatusCode | Sort-Object Count -Descending | Select-Object -First 1).Name
+
                 Add-Finding -Category "API Security" `
                     -CISControl "API8" `
                     -Finding "No rate limiting on authentication endpoint" `
-                    -Resource "$PVWA$endpoint" `
+                    -Resource "$PVWA$validRateLimitEndpoint" `
                     -CurrentValue "10 requests in $([math]::Round($avgTime * 10))ms total, no 429 responses" `
                     -ExpectedValue "Rate limiting (429) after 3-5 failed attempts" `
                     -Recommendation "Implement rate limiting and account lockout on auth endpoints" `
-                    -Severity "High"
-                break
+                    -Severity "High" `
+                    -RequestMethod "POST" `
+                    -RequestURL "$PVWA$validRateLimitEndpoint" `
+                    -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "Content-Type" = "application/json"; "User-Agent" = "CyberArk-Security-Audit" } `
+                    -RequestBody $testBody `
+                    -ResponseStatus ([int]$mostCommonStatus) `
+                    -ResponseHeaders @{} `
+                    -ResponseBody "10 rapid authentication attempts completed without rate limiting (no 429/503 or delays).`n$($responsesSummary -join "`n")"
             }
         }
         catch { }
+    }
+    else {
+        Write-AuditLog "Skipping API rate limiting test - no valid auth endpoint found (all endpoints redirect or return 404)" -Level Debug
     }
 
     # Test for GraphQL introspection
@@ -6990,41 +7819,101 @@ function Test-AuthenticationWeaknesses {
     # Test account lockout bypass via different usernames
     Write-AuditLog "Testing account lockout policy..." -Level Info
 
-    $lockoutTestEndpoint = "/PasswordVault/api/auth/logon"
-    $testUsername = "lockout_test_user_$(Get-Random)"
+    # Try multiple potential login endpoints (CyberArk Privilege Cloud uses different endpoints than self-hosted)
+    $lockoutEndpoints = @(
+        "/PasswordVault/api/Auth/CyberArk/Logon",
+        "/PasswordVault/API/Auth/Cyberark/Logon",
+        "/PasswordVault/v10/logon",
+        "/Security/StartAuthentication",
+        "/api/idadmin/Security/StartAuthentication"
+    )
 
-    try {
-        $lockoutDetected = $false
+    $lockoutTestEndpoint = $null
+    $endpointStatusCode = 0
 
-        for ($i = 0; $i -lt 15; $i++) {
-            $loginBody = @{
-                username = $testUsername
-                password = "wrong_password_$i"
-            } | ConvertTo-Json
-
-            try {
-                $response = Invoke-WebRequest -Uri "$PVWA$lockoutTestEndpoint" -Method POST -Body $loginBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-            }
-            catch {
-                if ($_.Exception.Response.StatusCode -eq 429 -or $_.Exception.Message -match "locked|blocked|too many") {
-                    $lockoutDetected = $true
-                    break
-                }
-            }
+    # First, find a valid login endpoint (one that doesn't redirect - means it exists)
+    foreach ($endpoint in $lockoutEndpoints) {
+        try {
+            # Use MaximumRedirection 0 to detect if endpoint redirects (doesn't exist)
+            $testBody = '{"username":"test","password":"test"}'
+            $testResponse = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+            $lockoutTestEndpoint = $endpoint
+            $endpointStatusCode = $testResponse.StatusCode
+            break
         }
-
-        if (-not $lockoutDetected) {
-            Add-Finding -Category "Authentication Security" `
-                -CISControl "AUTH5" `
-                -Finding "Account lockout not triggered after 15 failed attempts" `
-                -Resource $lockoutTestEndpoint `
-                -CurrentValue "No lockout or rate limiting detected" `
-                -ExpectedValue "Account lockout after 3-5 failed attempts" `
-                -Recommendation "Implement account lockout policy with progressive delays" `
-                -Severity "High"
+        catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            # 302/301 redirect means endpoint doesn't exist on this platform - skip
+            if ($statusCode -eq 302 -or $statusCode -eq 301) {
+                Write-AuditLog "Account lockout endpoint $endpoint redirects - not available on this platform" -Level Debug
+                continue
+            }
+            # 400, 401, 403 indicate the endpoint exists but requires proper auth
+            if ($statusCode -eq 400 -or $statusCode -eq 401 -or $statusCode -eq 403) {
+                $lockoutTestEndpoint = $endpoint
+                $endpointStatusCode = $statusCode
+                break
+            }
+            # 404 means endpoint doesn't exist, try next one
         }
     }
-    catch { }
+
+    if (-not $lockoutTestEndpoint) {
+        Add-SkippedCheck -Category "Authentication Security" -CISControl "AUTH5" `
+            -CheckName "Account Lockout Policy" `
+            -Reason "No valid login endpoint found - all endpoints redirect or return 404 (may be CyberArk Identity/Cloud with different auth flow)" `
+            -Type "NotApplicable"
+    }
+    else {
+        $testUsername = "lockout_test_user_$(Get-Random)"
+        $fullEndpointUrl = "$PVWA$lockoutTestEndpoint"
+
+        try {
+            $lockoutDetected = $false
+
+            for ($i = 0; $i -lt 15; $i++) {
+                $loginBody = @{
+                    username = $testUsername
+                    password = "wrong_password_$i"
+                } | ConvertTo-Json
+
+                try {
+                    $response = Invoke-WebRequest -Uri $fullEndpointUrl -Method POST -Body $loginBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                }
+                catch {
+                    if ($_.Exception.Response.StatusCode -eq 429 -or $_.Exception.Message -match "locked|blocked|too many") {
+                        $lockoutDetected = $true
+                        break
+                    }
+                }
+            }
+
+            if (-not $lockoutDetected) {
+                # Build sample request body for PoC
+                $sampleLoginBody = @{
+                    username = $testUsername
+                    password = "wrong_password_15"
+                } | ConvertTo-Json
+
+                Add-Finding -Category "Authentication Security" `
+                    -CISControl "AUTH5" `
+                    -Finding "Account lockout not triggered after 15 failed attempts" `
+                    -Resource $fullEndpointUrl `
+                    -CurrentValue "No lockout or rate limiting detected" `
+                    -ExpectedValue "Account lockout after 3-5 failed attempts" `
+                    -Recommendation "Implement account lockout policy with progressive delays" `
+                    -Severity "High" `
+                    -RequestMethod "POST" `
+                    -RequestURL $fullEndpointUrl `
+                    -RequestHeaders @{ "Host" = ([uri]$PVWA).Host; "Content-Type" = "application/json"; "User-Agent" = "CyberArk-Security-Audit" } `
+                    -RequestBody $sampleLoginBody `
+                    -ResponseStatus $endpointStatusCode `
+                    -ResponseHeaders @{} `
+                    -ResponseBody "15 consecutive failed login attempts for user '$testUsername' completed without triggering account lockout or rate limiting."
+            }
+        }
+        catch { }
+    }
 }
 
 function Test-InformationDisclosure {
@@ -17982,6 +18871,7 @@ function Start-Audit {
             }
             try { Test-HTTPMethods } catch { Add-SkippedCheck -Category "HTTP Methods" -CISControl "BB4" -CheckName "HTTP Methods" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
             try { Test-CookieSecurity } catch { Add-SkippedCheck -Category "Cookie Security" -CISControl "BB5" -CheckName "Cookie Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-SecurityHeaders } catch { Add-SkippedCheck -Category "Security Headers" -CISControl "HDR1" -CheckName "Security Headers" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
             try { Test-CORSConfiguration } catch { Add-SkippedCheck -Category "CORS Configuration" -CISControl "BB6" -CheckName "CORS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
             try { Test-BackupAndConfigFiles } catch { Add-SkippedCheck -Category "Exposed Files" -CISControl "BB7" -CheckName "Backup/Config Files" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
             try { Test-DirectoryListing } catch { Add-SkippedCheck -Category "Directory Listing" -CISControl "BB8" -CheckName "Directory Listing" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
