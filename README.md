@@ -25,6 +25,7 @@ This tool performs security checks including CIS Benchmark compliance, vendor be
 | **PoC Evidence** | Request/Response proof-of-concept included in HTML report for penetration testing |
 | **Selective Execution** | Run only specific check categories (portscan, CVE, blackbox, authenticated, network) |
 | **False Positive Reduction** | Baseline fingerprinting to eliminate SPA catch-all false positives |
+| **Identity Auth Testing** | StartAuthentication/ForgotUsername info disclosure and enumeration checks |
 
 ## Table of Contents
 
@@ -172,6 +173,7 @@ External/blackbox testing that can be run without any credentials:
 - JWT/OAuth2 security testing
 - WebSocket endpoint discovery
 - WAF evasion testing
+- CyberArk Identity/Privilege Cloud authentication endpoint testing (StartAuthentication, ForgotUsername)
 
 **Use Case**: Penetration testing, external security assessments, quick reconnaissance
 
@@ -223,6 +225,7 @@ Deep configuration audits requiring CyberArk REST API access:
 | CVE Checks | CVE1 - CVE23 | Known CyberArk vulnerability detection (2018-2025) |
 | Security Bulletins | CA25-x | CyberArk security bulletin checks |
 | API Security | API1 - API5 | REST API security testing |
+| Authentication Security | AUTH1 - AUTH2 | CyberArk Identity/Privilege Cloud authentication endpoint testing |
 | **Advanced Security** | | |
 | Machine Identity | MID1 - MID9 | Service account, AppID, and AIM Provider security |
 | Secrets Management | SEC1 - SEC14 | Credential Provider/CCP and Conjur security |
@@ -287,6 +290,18 @@ Deep configuration audits requiring CyberArk REST API access:
 - Rate limiting detection
 - Known vulnerability patterns
 
+#### CyberArk Identity / Privilege Cloud Authentication Security (AUTH1 - AUTH2)
+- **StartAuthentication Information Disclosure**: Detects sensitive data exposure including:
+  - Session ID exposure in pre-auth responses
+  - User enumeration via authentication challenges (valid vs invalid users)
+  - MFA mechanism disclosure (UP, SMS, EMAIL, OATH, QR, etc.)
+  - Email/PII disclosure in authentication responses
+  - Tenant ID exposure
+  - Authentication configuration details
+- **ForgotUsername Endpoint Enumeration**: Tests for username enumeration via password recovery:
+  - Feature availability detection
+  - Differential response analysis for valid vs invalid users
+
 #### Network Security (NET1 - NET7)
 - **Port Scanning**: Comprehensive scan of CyberArk-specific ports
   - PVWA (443, 80)
@@ -310,8 +325,10 @@ Deep configuration audits requiring CyberArk REST API access:
 - **CVE-2018-9843**: PVWA deserialization RCE (pre-auth)
 - **CVE-2019-7442**: XXE in SAML authentication
 - **CVE-2021-31796**: Remote credential file exploitation (probes for exposed .cred files, analyzes VerificationsFlag to determine if passwords can be decrypted)
-- **CVE-2021-37151**: CyberArk Identity username enumeration via MFA response length (Medium)
-- **CVE-2022-22700**: CyberArk Identity username enumeration via X-CFY-TX-TM timing header (Medium)
+- **CVE-2021-37151**: CyberArk Identity username enumeration via MFA response length (Medium) - Detected via StartAuthentication info disclosure check
+- **CVE-2022-22700**: CyberArk Identity username enumeration via X-CFY-TX-TM timing header (Medium) - Detected via StartAuthentication info disclosure check
+- **CWE-200**: StartAuthentication endpoint information disclosure (Session ID, MFA mechanisms, Tenant ID, Auth config)
+- **CWE-203**: ForgotUsername endpoint username enumeration via observable discrepancy
 - **CVE-2024-42340**: CWE-602 Client-side enforcement bypass
 - **CVE-2024-42339**: IDOR / Sensitive information disclosure
 - **CVE-2024-54840**: PVWA Host Header Injection (Medium)
