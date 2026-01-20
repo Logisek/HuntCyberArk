@@ -836,7 +836,7 @@ function Show-Banner {
     Write-Host "  ██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗" -ForegroundColor Magenta
     Write-Host "  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
     Write-Host ""
-    Write-Host "    CyberArk PAM Security Audit - Red Team Edition" -ForegroundColor Yellow
+    Write-Host "    CyberArk PAM Security Audit" -ForegroundColor Yellow
     Write-Host "    https://logisek.com | info@logisek.com" -ForegroundColor DarkGray
     Write-Host "    https://github.com/Logisek/HuntCyberArk" -ForegroundColor DarkGray
     Write-Host ""
@@ -6973,7 +6973,6 @@ function Test-APIVersioning {
 }
 
 #======================================================================
-# ADVANCED RED TEAM TESTING FUNCTIONS (v4.2)
 #======================================================================
 
 function Test-TimingAttacks {
@@ -11544,7 +11543,7 @@ function Test-AIMProviderConnectivity {
 
 #endregion
 
-#region Secrets Hub Integration (v4.3)
+#region Secrets Hub Integration
 
 function Test-SecretsHubIntegration {
     Write-AuditLog "Starting Secrets Hub security checks..." -Level Info
@@ -12005,7 +12004,7 @@ function Test-SecretsHubAuditLogging {
 
 #endregion
 
-#region Remote Access / Alero (v4.3)
+#region Remote Access / Alero
 
 function Test-RemoteAccessSecurity {
     Write-AuditLog "Starting Remote Access/Alero security checks..." -Level Info
@@ -12429,7 +12428,7 @@ function Test-RemoteAccessMFA {
 
 #endregion
 
-#region Kubernetes / Container Secrets (v4.3)
+#region Kubernetes / Container Secrets
 
 function Test-KubernetesSecretsSecurity {
     Write-AuditLog "Starting Kubernetes/Container secrets security checks..." -Level Info
@@ -12721,7 +12720,7 @@ function Test-K8sAuditLogging {
 
 #endregion
 
-#region DevSecOps Pipeline Security (v4.3)
+#region DevSecOps Pipeline Security
 
 function Test-DevSecOpsSecurity {
     Write-AuditLog "Starting DevSecOps pipeline security checks..." -Level Info
@@ -13079,7 +13078,7 @@ function Test-PipelineIdentityBinding {
 
 #endregion
 
-#region Privilege Cloud / SaaS-Specific (v4.3)
+#region Privilege Cloud / SaaS-Specific
 
 function Test-PrivilegeCloudSecurity {
     Write-AuditLog "Starting Privilege Cloud security checks..." -Level Info
@@ -13383,7 +13382,7 @@ function Test-CloudConnectorRedundancy {
 
 #endregion
 
-#region CyberArk Identity / Idaptive (v4.3)
+#region CyberArk Identity / Idaptive
 
 function Test-CyberArkIdentitySecurity {
     Write-AuditLog "Starting CyberArk Identity security checks..." -Level Info
@@ -16682,7 +16681,7 @@ function Export-JSONReport {
         reportInfo = @{
             title = "CyberArk Privileged Access Security Audit Report"
             generatedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
-            generatedBy = "CyberArk Security Audit Tool v4.4"
+            generatedBy = "CyberArk Security Audit Tool"
             reportVersion = "2.0"
             exportFormat = "JSON"
         }
@@ -17016,7 +17015,6 @@ function Start-Audit {
             -Type "Skipped"
     }
 
-    # Advanced Red Team Security Checks (v4.2)
     if ($IncludeTimingAttacks -or $IncludeJWTTests -or $IncludeWebSocketTests -or $IncludeWAFEvasion) {
         Write-Host ""
         Write-Host "[UNAUTH] Running Advanced Red Team Security Checks..." -ForegroundColor Red
@@ -17136,7 +17134,6 @@ function Start-Audit {
                 try { Test-SafeDualControl } catch { Add-SkippedCheck -Category "Safe Configuration" -CISControl "3.3" -CheckName "Safe Dual Control Audit" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 try { Test-AccountGroups } catch { Add-SkippedCheck -Category "Account Management" -CISControl "4.1" -CheckName "Account Groups Audit" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
 
-                # New v4.0 Security Checks
                 if (-not $SkipMachineIdentity) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Machine Identity Security Checks..." -ForegroundColor Yellow
@@ -17196,7 +17193,6 @@ function Start-Audit {
                     try { Test-ComplianceMapping } catch { Add-SkippedCheck -Category "Compliance Mapping" -CISControl "COMP1" -CheckName "Compliance Mapping" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.1 AD Security Checks
                 if ($IncludeADChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Active Directory Security Checks..." -ForegroundColor Yellow
@@ -17204,7 +17200,6 @@ function Start-Audit {
                     try { Test-ADSecurity } catch { Add-SkippedCheck -Category "AD Security" -CISControl "AD1" -CheckName "AD Security Checks" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.1 Conjur Integration Checks
                 if ($IncludeConjurChecks -or $ConjurUrl) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Conjur/Secrets Manager Integration Checks..." -ForegroundColor Yellow
@@ -17212,7 +17207,6 @@ function Start-Audit {
                     try { Test-ConjurIntegration } catch { Add-SkippedCheck -Category "Conjur Integration" -CISControl "SEC9" -CheckName "Conjur Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Secrets Hub Integration Checks
                 if ($IncludeSecretsHubChecks -or $SecretsHubUrl) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Secrets Hub Integration Checks..." -ForegroundColor Magenta
@@ -17220,7 +17214,6 @@ function Start-Audit {
                     try { Test-SecretsHubIntegration } catch { Add-SkippedCheck -Category "Secrets Hub" -CISControl "SH1" -CheckName "Secrets Hub Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Remote Access / Alero Checks
                 if ($IncludeRemoteAccessChecks -or $AleroUrl) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Remote Access / Alero Checks..." -ForegroundColor Magenta
@@ -17228,7 +17221,6 @@ function Start-Audit {
                     try { Test-RemoteAccessSecurity } catch { Add-SkippedCheck -Category "Remote Access" -CISControl "RA1" -CheckName "Remote Access Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Kubernetes Secrets Checks
                 if ($IncludeK8sChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Kubernetes / Container Secrets Checks..." -ForegroundColor Magenta
@@ -17236,7 +17228,6 @@ function Start-Audit {
                     try { Test-KubernetesSecretsSecurity } catch { Add-SkippedCheck -Category "Kubernetes" -CISControl "K8S1" -CheckName "Kubernetes Secrets Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 DevSecOps Pipeline Checks
                 if ($IncludeDevSecOpsChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running DevSecOps Pipeline Security Checks..." -ForegroundColor Magenta
@@ -17244,7 +17235,6 @@ function Start-Audit {
                     try { Test-DevSecOpsSecurity } catch { Add-SkippedCheck -Category "DevSecOps" -CISControl "DSO1" -CheckName "DevSecOps Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Privilege Cloud / SaaS Checks
                 if ($IncludePrivilegeCloudChecks -or $PrivilegeCloudTenant) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Privilege Cloud / SaaS Checks..." -ForegroundColor Magenta
@@ -17252,7 +17242,6 @@ function Start-Audit {
                     try { Test-PrivilegeCloudSecurity } catch { Add-SkippedCheck -Category "Privilege Cloud" -CISControl "PC1" -CheckName "Privilege Cloud Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 CyberArk Identity / Idaptive Checks
                 if ($IncludeIdentityChecks -or $IdentityTenantUrl) {
                     Write-Host ""
                     Write-Host "[AUTH] Running CyberArk Identity / Idaptive Checks..." -ForegroundColor Magenta
@@ -17260,7 +17249,6 @@ function Start-Audit {
                     try { Test-CyberArkIdentitySecurity } catch { Add-SkippedCheck -Category "CyberArk Identity" -CISControl "IDN1" -CheckName "CyberArk Identity Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Custom Plugins Checks
                 if ($IncludePluginChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Custom Plugins & Components Checks..." -ForegroundColor Magenta
@@ -17268,7 +17256,6 @@ function Start-Audit {
                     try { Test-CustomPluginSecurity } catch { Add-SkippedCheck -Category "Custom Plugins" -CISControl "PLG1" -CheckName "Custom Plugins Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Backup Security Checks
                 if ($IncludeBackupSecurityChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Backup & Recovery Security Checks..." -ForegroundColor Magenta
@@ -17276,7 +17263,6 @@ function Start-Audit {
                     try { Test-BackupSecurity } catch { Add-SkippedCheck -Category "Backup Security" -CISControl "BKP1" -CheckName "Backup Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 HSM Integration Checks
                 if ($IncludeHSMChecks -or $HSMProvider) {
                     Write-Host ""
                     Write-Host "[AUTH] Running HSM Integration Checks..." -ForegroundColor Magenta
@@ -17284,7 +17270,6 @@ function Start-Audit {
                     try { Test-HSMIntegration } catch { Add-SkippedCheck -Category "HSM Integration" -CISControl "HSM1" -CheckName "HSM Integration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 PTA Deep Dive Checks
                 if ($IncludePTADeepDive) {
                     Write-Host ""
                     Write-Host "[AUTH] Running PTA Deep Dive / Advanced Detection Checks..." -ForegroundColor Magenta
@@ -17292,7 +17277,6 @@ function Start-Audit {
                     try { Test-PTAAdvanced } catch { Add-SkippedCheck -Category "PTA Deep Dive" -CISControl "PTAD1" -CheckName "PTA Advanced Detection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Third-Party Integration Checks
                 if ($IncludeThirdPartyChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Third-Party Integration Checks (SIEM/ITSM/SOAR)..." -ForegroundColor Magenta
@@ -17300,7 +17284,6 @@ function Start-Audit {
                     try { Test-ThirdPartyIntegrations } catch { Add-SkippedCheck -Category "Third-Party Integration" -CISControl "TPI1" -CheckName "Third-Party Integrations" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Operational Hygiene Checks
                 if ($IncludeOperationalChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Operational Hygiene Metrics Checks..." -ForegroundColor Magenta
@@ -17308,7 +17291,6 @@ function Start-Audit {
                     try { Test-OperationalHygiene } catch { Add-SkippedCheck -Category "Operational Hygiene" -CISControl "OPS1" -CheckName "Operational Hygiene Metrics" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Attack Path Simulation Checks
                 if ($IncludeAttackPathChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Attack Path Simulation Checks (Red Team)..." -ForegroundColor Magenta
@@ -17316,7 +17298,6 @@ function Start-Audit {
                     try { Test-AttackPathSimulation } catch { Add-SkippedCheck -Category "Attack Path Simulation" -CISControl "APS1" -CheckName "Attack Path Simulation" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Supply Chain Integrity Checks
                 if ($IncludeSupplyChainChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Supply Chain Integrity Checks..." -ForegroundColor Magenta
@@ -17324,7 +17305,6 @@ function Start-Audit {
                     try { Test-SupplyChainIntegrity } catch { Add-SkippedCheck -Category "Supply Chain Integrity" -CISControl "SCI1" -CheckName "Supply Chain Integrity" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.3 Network Segmentation Checks
                 if ($IncludeNetworkSegmentationChecks) {
                     Write-Host ""
                     Write-Host "[AUTH] Running Network Segmentation Checks..." -ForegroundColor Magenta
@@ -17332,7 +17312,6 @@ function Start-Audit {
                     try { Test-NetworkSegmentation } catch { Add-SkippedCheck -Category "Network Segmentation" -CISControl "NSG1" -CheckName "Network Segmentation" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.1 AIM Provider Checks
                 Write-Host ""
                 Write-Host "[AUTH] Running AIM Provider Security Checks..." -ForegroundColor Yellow
                 Write-Host "==============================================" -ForegroundColor Yellow
