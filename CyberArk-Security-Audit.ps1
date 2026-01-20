@@ -7545,6 +7545,378 @@ function Test-CVE202137151 {
     }
 }
 
+function Test-StartAuthenticationInfoDisclosure {
+    <#
+    .SYNOPSIS
+        Tests for information disclosure via CyberArk Identity StartAuthentication endpoint
+    .DESCRIPTION
+        The /api/idadmin/Security/StartAuthentication endpoint may expose sensitive information
+        including session IDs, MFA mechanisms, email domains, tenant IDs, and authentication
+        configuration without proper authentication.
+
+        Related vulnerabilities:
+        - CWE-200: Exposure of Sensitive Information to an Unauthorized Actor
+        - CWE-203: Observable Discrepancy (user enumeration)
+        - CVE-2021-37151: CyberArk Identity username enumeration
+        - CVE-2022-22700: CyberArk Identity enumeration via timing
+    #>
+    Write-AuditLog "Testing StartAuthentication endpoint for information disclosure..." -Level Info
+
+    $authEndpoints = @(
+        "/api/idadmin/Security/StartAuthentication",
+        "/Security/StartAuthentication",
+        "/identity/Security/StartAuthentication"
+    )
+
+    foreach ($endpoint in $authEndpoints) {
+        try {
+            $testBody = @{
+                TenantId = "abc-1234"
+                Version = "1.0"
+                User = "Test_user"
+            } | ConvertTo-Json
+
+            $requestHeaders = @{
+                "Host" = ([uri]$PVWA).Host
+                "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+                "Accept" = "application/json"
+                "Accept-Language" = "en-US,en;q=0.9"
+                "Content-Type" = "application/json"
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+
+            if ($response.StatusCode -eq 200) {
+                $responseContent = $response.Content
+                $responseJson = $null
+
+                try {
+                    $responseJson = $responseContent | ConvertFrom-Json
+                } catch {
+                    continue
+                }
+
+                # Build PoC headers
+                $pocResponseHeaders = @{}
+                foreach ($h in $response.Headers.Keys) {
+                    $pocResponseHeaders[$h] = $response.Headers[$h] -join ", "
+                }
+
+                $findingsFound = @()
+
+                # Check 1: Session ID Exposure
+                if ($responseContent -match '"SessionId"\s*:\s*"([^"]+)"') {
+                    $sessionId = $Matches[1]
+                    $findingsFound += "SessionId exposed: $($sessionId.Substring(0, [Math]::Min(20, $sessionId.Length)))..."
+
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "AUTH1" `
+                        -Finding "Session ID exposed in StartAuthentication response" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "SessionId: $($sessionId.Substring(0, [Math]::Min(30, $sessionId.Length)))..." `
+                        -ExpectedValue "Session ID should not be exposed pre-authentication" `
+                        -Recommendation "Review CyberArk Identity configuration to minimize pre-auth information exposure" `
+                        -Severity "Medium" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -RequestHeaders $requestHeaders `
+                        -RequestBody $testBody `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocResponseHeaders `
+                        -ResponseBody $responseContent.Substring(0, [Math]::Min(500, $responseContent.Length))
+                }
+
+                # Check 2: User Enumeration via Challenges
+                if ($responseContent -match '"Challenges"\s*:\s*\[' -and $responseContent -match '"Mechanisms"\s*:\s*\[') {
+                    Add-Finding -Category "Authentication Security" `
+                        -CISControl "AUTH1" `
+                        -Finding "User enumeration possible via StartAuthentication response" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "Response contains MFA challenges - confirms user exists" `
+                        -ExpectedValue "Consistent responses regardless of user validity (CWE-203)" `
+                        -Recommendation "Implement consistent responses for valid/invalid users to prevent enumeration" `
+                        -Severity "Medium" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -RequestHeaders $requestHeaders `
+                        -RequestBody $testBody `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocResponseHeaders `
+                        -ResponseBody "Response contains Challenges and Mechanisms arrays indicating valid user"
+                }
+
+                # Check 3: MFA Mechanisms Disclosure
+                $mfaMechanisms = @()
+                if ($responseContent -match '"Name"\s*:\s*"UP"') { $mfaMechanisms += "Password" }
+                if ($responseContent -match '"Name"\s*:\s*"OATH"') { $mfaMechanisms += "OATH OTP" }
+                if ($responseContent -match '"Name"\s*:\s*"EMAIL"') { $mfaMechanisms += "Email OTP" }
+                if ($responseContent -match '"Name"\s*:\s*"SMS"') { $mfaMechanisms += "SMS OTP" }
+                if ($responseContent -match '"Name"\s*:\s*"PHONE"') { $mfaMechanisms += "Phone Call" }
+                if ($responseContent -match '"Name"\s*:\s*"PF"') { $mfaMechanisms += "Push Notification" }
+                if ($responseContent -match '"Name"\s*:\s*"QR"') { $mfaMechanisms += "QR Code" }
+                if ($responseContent -match '"Name"\s*:\s*"FIDO2"') { $mfaMechanisms += "FIDO2/WebAuthn" }
+
+                if ($mfaMechanisms.Count -gt 0) {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "INFO1" `
+                        -Finding "MFA mechanisms disclosed in authentication response" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "Enrolled MFA: $($mfaMechanisms -join ', ')" `
+                        -ExpectedValue "MFA types should not be disclosed to unauthenticated users" `
+                        -Recommendation "Attackers can use this to plan targeted MFA bypass attacks" `
+                        -Severity "Low" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -RequestHeaders $requestHeaders `
+                        -RequestBody $testBody `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocResponseHeaders `
+                        -ResponseBody "MFA mechanisms found: $($mfaMechanisms -join ', ')"
+                }
+
+                # Check 4: Email/PII Disclosure
+                if ($responseContent -match '"MaskedEmailAddress"\s*:\s*"([^"]+)"' -or $responseContent -match '"PartialAddress"\s*:\s*"([^"]+)"') {
+                    $emailInfo = if ($Matches[1]) { $Matches[1] } else { "partial email disclosed" }
+
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "INFO1" `
+                        -Finding "Partial email/PII disclosed in authentication response" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "Email domain/partial: $emailInfo" `
+                        -ExpectedValue "No PII should be disclosed to unauthenticated users (CWE-200)" `
+                        -Recommendation "Configure CyberArk Identity to fully mask email addresses in pre-auth responses" `
+                        -Severity "Medium" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -RequestHeaders $requestHeaders `
+                        -RequestBody $testBody `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocResponseHeaders `
+                        -ResponseBody "Partial PII exposed in response"
+                }
+
+                # Check 5: Tenant ID Disclosure
+                if ($responseContent -match '"TenantId"\s*:\s*"([^"]+)"') {
+                    $tenantId = $Matches[1]
+                    if ($tenantId -ne "abc-1234") {  # Real tenant ID returned, not our test value
+                        Add-Finding -Category "Information Disclosure" `
+                            -CISControl "INFO1" `
+                            -Finding "Real Tenant ID disclosed in authentication response" `
+                            -Resource "$PVWA$endpoint" `
+                            -CurrentValue "TenantId: $tenantId" `
+                            -ExpectedValue "Tenant ID should not be disclosed or should match request" `
+                            -Recommendation "Review tenant ID exposure in authentication responses" `
+                            -Severity "Low" `
+                            -RequestMethod "POST" `
+                            -RequestURL "$PVWA$endpoint" `
+                            -RequestHeaders $requestHeaders `
+                            -RequestBody $testBody `
+                            -ResponseStatus $response.StatusCode `
+                            -ResponseHeaders $pocResponseHeaders `
+                            -ResponseBody "Real TenantId returned: $tenantId"
+                    }
+                }
+
+                # Check 6: Authentication Configuration Disclosure
+                $configExposed = @()
+                if ($responseContent -match '"AllowPersist"\s*:\s*(true|false)') { $configExposed += "AllowPersist=$($Matches[1])" }
+                if ($responseContent -match '"AllowForgotPassword"\s*:\s*(true|false)') { $configExposed += "AllowForgotPassword=$($Matches[1])" }
+                if ($responseContent -match '"AllowLoginMfaCache"\s*:\s*(true|false)') { $configExposed += "AllowLoginMfaCache=$($Matches[1])" }
+                if ($responseContent -match '"EndpointAuthenticationEnabled"\s*:\s*(true|false)') { $configExposed += "EndpointAuthEnabled=$($Matches[1])" }
+                if ($responseContent -match '"RetryWaitingTime"\s*:\s*(\d+)') { $configExposed += "RetryWaitingTime=$($Matches[1])" }
+
+                if ($configExposed.Count -ge 3) {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "INFO1" `
+                        -Finding "Authentication configuration exposed in response" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "$($configExposed -join '; ')" `
+                        -ExpectedValue "Configuration details should not be exposed pre-authentication" `
+                        -Recommendation "Attackers can use config info to plan authentication attacks" `
+                        -Severity "Low" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$PVWA$endpoint" `
+                        -RequestHeaders $requestHeaders `
+                        -RequestBody $testBody `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $pocResponseHeaders `
+                        -ResponseBody "Auth config exposed: $($configExposed -join '; ')"
+                }
+
+                # If any findings, we found vulnerable endpoint - break
+                if ($findingsFound.Count -gt 0 -or $mfaMechanisms.Count -gt 0) {
+                    Write-AuditLog "Found information disclosure in $endpoint" -Level Warning
+                    break
+                }
+            }
+        }
+        catch {
+            # Endpoint not accessible or error - try next
+        }
+    }
+}
+
+function Test-ForgotUsernameEnumeration {
+    <#
+    .SYNOPSIS
+        Tests for username enumeration via CyberArk Identity ForgotUsername endpoint
+    .DESCRIPTION
+        The /api/idadmin/Security/ForgotUsername endpoint may allow username/email enumeration
+        if it returns different responses for valid vs invalid users.
+
+        Also checks if the feature is enabled (potential attack surface).
+    #>
+    Write-AuditLog "Testing ForgotUsername endpoint for enumeration..." -Level Info
+
+    $forgotEndpoints = @(
+        "/api/idadmin/Security/ForgotUsername",
+        "/Security/ForgotUsername",
+        "/identity/Security/ForgotUsername"
+    )
+
+    foreach ($endpoint in $forgotEndpoints) {
+        try {
+            $requestHeaders = @{
+                "Host" = ([uri]$PVWA).Host
+                "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "Accept" = "application/json"
+                "Content-Type" = "application/json"
+            }
+
+            # Test with likely valid email format
+            $testBody1 = @{ SearchKey = "admin@test.com" } | ConvertTo-Json
+            $response1 = $null
+            $response1Content = $null
+
+            try {
+                $response1 = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody1 -ContentType "application/json" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+                $response1Content = $response1.Content
+            } catch {
+                if ($_.Exception.Response) {
+                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $response1Content = $reader.ReadToEnd()
+                }
+            }
+
+            if (-not $response1Content) { continue }
+
+            $json1 = $null
+            try { $json1 = $response1Content | ConvertFrom-Json } catch { continue }
+
+            # Build PoC headers
+            $pocResponseHeaders = @{}
+            if ($response1) {
+                foreach ($h in $response1.Headers.Keys) {
+                    $pocResponseHeaders[$h] = $response1.Headers[$h] -join ", "
+                }
+            }
+
+            # Check if feature is unavailable (disabled)
+            if ($response1Content -match "recovery service is currently unavailable|feature is disabled|not available") {
+                # Feature is disabled - good security practice, report as Pass
+                Add-Finding -Category "Authentication Security" `
+                    -CISControl "AUTH1" `
+                    -Finding "ForgotUsername feature is disabled" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "Feature unavailable: $($json1.Message)" `
+                    -ExpectedValue "Feature should be disabled or properly rate-limited" `
+                    -Recommendation "N/A - Feature is correctly disabled, reducing attack surface" `
+                    -Severity "Info" `
+                    -Status "Pass" `
+                    -RequestMethod "POST" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -RequestHeaders $requestHeaders `
+                    -RequestBody $testBody1 `
+                    -ResponseStatus $(if ($response1) { $response1.StatusCode } else { 200 }) `
+                    -ResponseHeaders $pocResponseHeaders `
+                    -ResponseBody $response1Content.Substring(0, [Math]::Min(500, $response1Content.Length))
+                break
+            }
+
+            # Feature is enabled - test for enumeration
+            if ($json1.success -eq $true -or $response1Content -match '"Result"') {
+                # Test with invalid/random search key
+                $testBody2 = @{ SearchKey = "nonexistent_user_$(Get-Random)@invalid.test" } | ConvertTo-Json
+                $response2 = $null
+                $response2Content = $null
+
+                try {
+                    $response2 = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody2 -ContentType "application/json" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+                    $response2Content = $response2.Content
+                } catch {
+                    if ($_.Exception.Response) {
+                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                        $response2Content = $reader.ReadToEnd()
+                    }
+                }
+
+                if ($response2Content) {
+                    $json2 = $null
+                    try { $json2 = $response2Content | ConvertFrom-Json } catch {}
+
+                    # Check for enumeration indicators
+                    $enumIndicators = @()
+
+                    # Different success values
+                    if ($json1.success -ne $json2.success) {
+                        $enumIndicators += "Different success values"
+                    }
+
+                    # Different messages
+                    if ($json1.Message -ne $json2.Message -and $json1.Message -and $json2.Message) {
+                        $enumIndicators += "Different error messages"
+                    }
+
+                    # Significant response length difference
+                    if ([Math]::Abs($response1Content.Length - $response2Content.Length) -gt 50) {
+                        $enumIndicators += "Response length differs by $([Math]::Abs($response1Content.Length - $response2Content.Length)) bytes"
+                    }
+
+                    if ($enumIndicators.Count -gt 0) {
+                        Add-Finding -Category "Authentication Security" `
+                            -CISControl "AUTH1" `
+                            -Finding "Username enumeration possible via ForgotUsername endpoint" `
+                            -Resource "$PVWA$endpoint" `
+                            -CurrentValue "Enumeration indicators: $($enumIndicators -join '; ')" `
+                            -ExpectedValue "Consistent responses regardless of user validity (CWE-203)" `
+                            -Recommendation "Configure consistent responses for valid/invalid users in ForgotUsername" `
+                            -Severity "Medium" `
+                            -RequestMethod "POST" `
+                            -RequestURL "$PVWA$endpoint" `
+                            -RequestHeaders $requestHeaders `
+                            -RequestBody $testBody1 `
+                            -ResponseStatus $(if ($response1) { $response1.StatusCode } else { 200 }) `
+                            -ResponseHeaders $pocResponseHeaders `
+                            -ResponseBody "Test 1 (admin@test.com): $($response1Content.Substring(0, [Math]::Min(200, $response1Content.Length)))..."
+                    }
+                    else {
+                        # Feature enabled but consistent responses - still a finding as it increases attack surface
+                        Add-Finding -Category "Authentication Security" `
+                            -CISControl "AUTH1" `
+                            -Finding "ForgotUsername feature is enabled" `
+                            -Resource "$PVWA$endpoint" `
+                            -CurrentValue "Feature accessible and responding" `
+                            -ExpectedValue "Consider disabling if not required, or implement rate limiting" `
+                            -Recommendation "Disable ForgotUsername if not needed, or ensure rate limiting is configured" `
+                            -Severity "Low" `
+                            -RequestMethod "POST" `
+                            -RequestURL "$PVWA$endpoint" `
+                            -RequestHeaders $requestHeaders `
+                            -RequestBody $testBody1 `
+                            -ResponseStatus $(if ($response1) { $response1.StatusCode } else { 200 }) `
+                            -ResponseHeaders $pocResponseHeaders `
+                            -ResponseBody $response1Content.Substring(0, [Math]::Min(300, $response1Content.Length))
+                    }
+                }
+                break
+            }
+        }
+        catch {
+            # Endpoint not accessible - try next
+        }
+    }
+}
+
 function Test-PrototypePollution {
     # Third-Party: CVE-2024-38996 - ag-grid Prototype Pollution
     # Note: This is an ag-grid library vulnerability, not CyberArk-specific
@@ -19391,6 +19763,8 @@ function Start-Audit {
         try { Test-CVE202454840 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE21" -CheckName "CVE-2024-54840 Host Header Injection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE202222700 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE22" -CheckName "CVE-2022-22700 Username Enumeration (X-CFY-TX-TM)" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE202137151 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE23" -CheckName "CVE-2021-37151 Username Enumeration (MFA Response)" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-StartAuthenticationInfoDisclosure } catch { Add-SkippedCheck -Category "Information Disclosure" -CISControl "AUTH1" -CheckName "StartAuthentication Info Disclosure" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-ForgotUsernameEnumeration } catch { Add-SkippedCheck -Category "Authentication Security" -CISControl "AUTH1" -CheckName "ForgotUsername Enumeration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-PrototypePollution } catch { Add-SkippedCheck -Category "Third-Party Vulnerabilities" -CISControl "TP2" -CheckName "ag-grid Prototype Pollution" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CA25Bulletins } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CA25-32" -CheckName "CA25 Security Bulletins" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
 
