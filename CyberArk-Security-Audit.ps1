@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     CyberArk PAM Security Configuration Audit Script - Red Team Edition
 .DESCRIPTION
@@ -8,31 +8,6 @@
     IMPORTANT: This tool is designed to run REMOTELY against CyberArk servers via network.
     It does NOT need to be executed on the CyberArk servers themselves.
     All checks are performed over the network using PVWA API, port scanning, and web testing.
-    
-    Includes:
-    - CIS Benchmark compliance checks (via API)
-    - Vendor Best Practice assessments (via API)
-    - Blackbox security testing (exposed endpoints, information disclosure, etc.)
-    - Network security analysis (port scanning, vault port security)
-    - SSL/TLS cipher suite enumeration
-    - CVE-specific vulnerability checks (CVE-2021-31796, CVE-2024-42339, CVE-2024-42340, etc.)
-    - 2025 CVE coverage (CVE-2025-22270 through CVE-2025-49831)
-    - API security testing (BOLA, injection, mass assignment)
-    - Session security and header injection testing
-    - Component version detection and vulnerability mapping
-    
-    Optional (if running directly on CyberArk server with -IncludeLocalHostChecks):
-    - Host security checks (Windows firewall, service accounts, credential caching)
-    
-    New in v4.2 (Red Team Enhancements):
-    - OPSEC/Stealth Mode with configurable delays and jitter
-    - Proxy support for Burp Suite/ZAP integration
-    - Timing attack detection (user enumeration, blind SQLi)
-    - JWT/OAuth2 security testing (none algorithm, key confusion)
-    - WebSocket endpoint discovery and CSWSH testing
-    - WAF/IDS evasion testing (encoding bypasses, HPP, request smuggling)
-    - Randomized User-Agent rotation
-    - Secure credential handling with memory cleanup
     
     Generates comprehensive HTML, CSV, and JSON reports with risk scoring.
 .PARAMETER PVWA
@@ -45,13 +20,6 @@
     PSCredential object (will prompt if not provided)
 .PARAMETER SkipPortScan
     Skip network port scanning (faster execution)
-.PARAMETER SkipHostChecks
-    [DEPRECATED] Use default behavior - host checks are now skipped by default since this tool runs remotely.
-    Host checks examine the LOCAL machine, not the remote CyberArk servers.
-.PARAMETER IncludeLocalHostChecks
-    Include local host security checks (Windows Firewall, services, registry, etc.)
-    NOTE: These checks examine the LOCAL machine running the script, NOT the remote CyberArk servers.
-    Only enable this if you are running the script directly on a CyberArk server component.
 .PARAMETER SkipCVEChecks
     Skip CVE-specific vulnerability testing
 .PARAMETER SkipAPITests
@@ -67,8 +35,8 @@
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -UnauthenticatedOnly
     # Blackbox-only audit - no credentials needed
 .EXAMPLE
-    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan -SkipHostChecks
-    # Full audit but skip port scanning and host checks
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -SkipPortScan
+    # Full audit but skip port scanning
 .EXAMPLE
     .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OPSECMode -UnauthenticatedOnly
     # Stealth scan with delays and reduced noise - ideal for red team ops
@@ -88,70 +56,7 @@
     WARNING: Enable password spraying and brute force testing (requires explicit user confirmation)
     This parameter must be explicitly set to enable any password spraying or brute force functionality.
     By default, the script only tests known default passwords to avoid account lockouts.
-.NOTES
-    Version: 4.3
-    Requires: PowerShell 7+, CyberArk REST API v12+
-    Author: Security Assessment Team
-    CIS Benchmark Reference: CIS CyberArk PAM Benchmark v1.0
-    Vendor Reference: CyberArk Security Hardening Guide, CyberArk Best Practices
-    
-    Security Check Categories:
-    - CIS Controls (1.x - 8.x): CIS Benchmark compliance
-    - Vendor Controls (V1.x - V8.x): CyberArk best practices
-    - Blackbox Controls (BB1 - BB11): External security testing
-    - Network Controls (NET1 - NET7): Network security analysis
-    - TLS Controls (TLS1 - TLS4): SSL/TLS configuration
-    - CVE Controls (CVE1 - CVE14): Known CyberArk vulnerability checks (2021-2025)
-    - Third-Party Controls (TP1 - TP3): Third-party library vulnerability checks (Log4j, Spring, ag-grid)
-    - CA Controls (CA25-x): CyberArk security bulletin checks
-    - Machine Identity (MID1 - MID9): Service account, AppID, and AIM Provider security
-    - Secrets Management (SEC1 - SEC14): Credential Provider and Conjur security
-    - Zero Standing Privileges (ZSP1 - ZSP5): JIT access assessment
-    - Identity Governance (IGA1 - IGA8): Lifecycle and permission management
-    - EPM Controls (EPM1 - EPM6): Endpoint Privilege Manager integration
-    - Cloud Security (CLD1 - CLD6): Secure Cloud Access checks
-    - Disaster Recovery (DR1 - DR5): HA and DR configuration
-    - Compliance Mapping (COMP1 - COMP4): NIST, SOC2, PCI-DSS alignment
-    - Audit Logging (AUD1 - AUD4): SIEM and logging validation
-    - API Controls (API1 - API5): API security testing
-    - Host Controls (HOST1 - HOST5): Windows host security
-    
-    CyberArk Tools Integration (v4.1):
-    - AD Security (AD1 - AD7): Shadow admins, Skeleton Key, SID History, SPNs, Kerberos delegation (zBang-inspired)
-    - Server Hardening (HARD1 - HARD8): Server roles, audit policy, RDP, registry, filesystem (CYBRHardeningCheck-inspired)
-    - Vault Hardening (VAULT1 - VAULT6): NIC, static IP, domain membership, firewall, certificates
-    - PSM Hardening (PSMH1 - PSMH10): AppLocker, RDP users, drives, RDS, SMB
-    - PVWA Hardening (PVWAH1 - PVWAH8): WebDAV, IIS, app pool, MIME types
-    - CPM Hardening (CPMH1 - CPMH4): FIPS, DEP, credential files, services
-    - Application Control (APPCTL1 - APPCTL5): DLL injection/hijacking, AppLocker bypasses (Evasor-inspired)
-    
-    Red Team Enhancements (v4.2):
-    - OPSEC Mode: Stealth scanning with delays, jitter, and reduced noise
-    - Proxy Support: Route all traffic through Burp Suite, ZAP, or other proxies
-    - Timing Attacks: Detect user enumeration and blind injection vulnerabilities
-    - JWT Testing: Algorithm confusion, none bypass, key validation
-    - WebSocket Testing: Endpoint discovery, CSWSH detection
-    - WAF Evasion: Encoding bypasses, HPP, request smuggling indicators
-    - User-Agent Rotation: Randomized or custom User-Agent strings
-    - Quiet Mode: Reduced console output for automation
-    
-    Security Posture Expansion (v4.3):
-    - Secrets Hub (SH1 - SH6): Cloud-native secrets sync to AWS/Azure/GCP
-    - Remote Access (RA1 - RA6): Vendor/Alero privileged access security
-    - Kubernetes (K8S1 - K8S8): Container secrets and Secrets Provider
-    - DevSecOps (DSO1 - DSO6): CI/CD pipeline security and secrets sprawl
-    - Privilege Cloud (PC1 - PC5): SaaS-specific connector and tenant checks
-    - CyberArk Identity (IDN1 - IDN6): SSO, adaptive MFA, lifecycle sync
-    - Custom Plugins (PLG1 - PLG5): PSM/CPM plugin security and signatures
-    - Backup Security (BKP1 - BKP5): Encryption, permissions, restoration testing
-    - HSM Integration (HSM1 - HSM4): Hardware security module connectivity
-    - PTA Deep Dive (PTAD1 - PTAD6): Detection rules, ML quality, alert fatigue
-    - Third-Party Integration (TPI1 - TPI5): SIEM, ITSM, SOAR connectivity
-    - Operational Hygiene (OPS1 - OPS8): Onboarding backlog, failures, metrics
-    - Attack Path Simulation (APS1 - APS6): PtH, NTLM relay, Kerberoasting
-    - Supply Chain Integrity (SCI1 - SCI5): File hashes, signatures, patch currency
-    - Network Segmentation (NSG1 - NSG5): Vault isolation, micro-segmentation
-    
+.NOTES    
     WARNING: Some tests (port scanning, CVE checks, WAF evasion) may trigger security alerts.
     Always obtain proper authorization before running this script.
     
@@ -183,12 +88,6 @@ param(
     [switch]$SkipPortScan,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipHostChecks,  # Deprecated - kept for backward compatibility
-    
-    [Parameter(Mandatory = $false)]
-    [switch]$IncludeLocalHostChecks,  # Opt-in for local host checks (off by default for remote audits)
-
-    [Parameter(Mandatory = $false)]
     [switch]$SkipCVEChecks,
 
     [Parameter(Mandatory = $false)]
@@ -206,7 +105,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$VerboseOutput,
 
-    # New v4.0 parameters
     [Parameter(Mandatory = $false)]
     [switch]$SkipSecretsChecks,
 
@@ -231,12 +129,8 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$ComplianceMapping,
 
-    # New v4.1 parameters - Enhanced security checks from CyberArk tools
     [Parameter(Mandatory = $false)]
     [switch]$IncludeADChecks,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$IncludeAppControlChecks,
 
     [Parameter(Mandatory = $false)]
     [switch]$IncludeConjurChecks,
@@ -248,12 +142,8 @@ param(
     [string]$DomainController,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipHardeningChecks,
-
-    [Parameter(Mandatory = $false)]
     [switch]$SkipDefaultCredentialTests,
 
-    # New v4.2 parameters - Red Team / Offensive Security Enhancements
     [Parameter(Mandatory = $false)]
     [Alias("Stealth")]
     [switch]$OPSECMode,
@@ -306,7 +196,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$QuietMode,
 
-    # New v4.3 parameters - Security Posture Expansion
     [Parameter(Mandatory = $false)]
     [switch]$IncludeSecretsHubChecks,
 
@@ -558,21 +447,21 @@ $script:Config = @{
     MaxReplicationLagMinutes = 15             # Maximum DR replication lag
     RequireBreakGlassAccounts = $true         # Require break-glass accounts configured
 
-    # Active Directory Security thresholds (zBang-inspired)
+    # Active Directory Security thresholds
     MaxDelegatedAccounts = 10                 # Maximum accounts with delegation
     MaxShadowAdminPercentage = 5              # Maximum % of shadow admins
     SPNPrivilegedAccountLimit = 0             # Privileged accounts with SPNs should be 0
     SIDHistoryAgeThresholdDays = 365          # SID History older than this is suspicious
     MaxUnconstrainedDelegation = 0            # Unconstrained delegation accounts (should be 0)
 
-    # Server Hardening thresholds (CYBRHardeningCheck-inspired)
+    # Server Hardening thresholds
     RequireStaticIP = $true                   # Vault should use static IP
     RequireNonDomainJoined = $true            # Vault should not be domain-joined
     RequireFIPS = $false                      # FIPS mode requirement
     MinRDPEncryptionLevel = 3                 # Minimum RDP encryption level (High)
     RequireNLA = $true                        # Require Network Level Authentication
 
-    # Application Control thresholds (Evasor-inspired)
+    # Application Control thresholds
     CheckDLLInjection = $true                 # Check for DLL injection vulnerabilities
     CheckDLLHijacking = $true                 # Check for DLL hijacking risks
     MaxWritableSystemPaths = 0                # Writable paths in system directories
@@ -690,12 +579,48 @@ $script:CISControls = @{
     "CVE12" = "CVE-2025-49827 (Secrets Manager IAM Bypass)"
     "CVE13" = "CVE-2025-49828 (Secrets Manager RCE)"
     "CVE14" = "CVE-2025-49831 (Secrets Manager Network Bypass)"
-    "CVE16" = "CVE-2018-9843 (PVWA Deserialization RCE)"
-    "CVE17" = "CVE-2019-7442 (XXE in SAML Authentication)"
-    "CVE18" = "CVE-2018-9842 (Vault Memory Disclosure - Port 1858)"
+    "CVE15" = "CVE-2025-49830 (Secrets Manager Path Traversal)"
+    "CVE16" = "CVE-2025-49829 (Secrets Manager Missing Validations)"
+    "CVE17" = "CVE-2018-9843 (PVWA Deserialization RCE)"
+    "CVE18" = "CVE-2019-7442 (XXE in SAML Authentication)"
+    "CVE19" = "CVE-2018-9842 (Vault Memory Disclosure - Port 1858)"
+    "CVE20" = "CVE-2024-57967 (PVWA LDAP Mapping Privilege Escalation)"
+    "CVE21" = "CVE-2024-54840 (PVWA Host Header Injection)"
+    "CVE22" = "CVE-2022-22700 (Identity Username Enumeration X-CFY-TX-TM)"
+    "CVE23" = "CVE-2021-37151 (Identity Username Enumeration MFA Response)"
     "TP2" = "Third-Party: ag-grid Prototype Pollution (CVE-2024-38996)"
     "TP3" = "Third-Party: Log4Shell (CVE-2021-44228)"
-    # Security Bulletin Controls (CA prefix)
+    # Authentication Security Controls (AUTH prefix)
+    "AUTH1" = "Username enumeration"
+    "AUTH2" = "JWT algorithm confusion"
+    "AUTH3" = "Cookie security flags"
+    "AUTH4" = "Session fixation"
+    "AUTH5" = "Account lockout policy"
+    # Security Headers Controls (HDR prefix)
+    "HDR1" = "Missing security headers"
+    "HDR2" = "Information disclosure headers"
+    # IIS Hardening Controls (IIS prefix)
+    "IIS1" = "Dangerous HTTP methods enabled"
+    "IIS2" = "Directory listing enabled"
+    "IIS3" = "Detailed error messages"
+    # Information Disclosure Controls (INFO prefix)
+    "INFO1" = "Sensitive file exposure"
+    "INFO2" = "Version disclosure"
+    "INFO3" = "Internal path disclosure"
+    # Network Security Controls (NET prefix - extended)
+    "NET8" = "Host header injection"
+    "NET9" = "Open redirect"
+    "NET10" = "HTTP request smuggling"
+    # Injection Controls (INJ prefix)
+    "INJ1" = "LDAP injection"
+    # CyberArk-Specific Controls (CA prefix)
+    "CA1" = "CCP anonymous access"
+    "CA2" = "PVWA internal endpoint exposure"
+    "CA3" = "Vault port 1858 exposure"
+    "CA4" = "PSM RDP port exposure"
+    "CA5" = "Credential file web exposure"
+    "CA6" = "PSMP SSH exposure"
+    # Security Bulletin Controls (CA25 prefix)
     "CA25-25" = "Secrets Manager SaaS Edge DoS"
     "CA25-29" = "PVWA Prototype Pollution"
     "CA25-32" = "CCP Sensitive Info Disclosure"
@@ -707,12 +632,9 @@ $script:CISControls = @{
     "API3" = "Broken object level authorization"
     "API4" = "Mass assignment"
     "API5" = "API versioning security"
-    # Host Security Controls (HOST prefix)
-    "HOST1" = "Windows firewall configuration"
-    "HOST2" = "Service account privileges"
-    "HOST3" = "Credential caching"
-    "HOST4" = "Event log configuration"
-    "HOST5" = "Antivirus/EDR status"
+    "API6" = "API documentation exposure"
+    "API7" = "CORS misconfiguration"
+    "API8" = "Rate limiting absence"
     # Machine Identity Security Controls (MID prefix)
     "MID1" = "Service account enumeration"
     "MID2" = "Machine identity rotation"
@@ -774,7 +696,7 @@ $script:CISControls = @{
     "AUD2" = "Audit log retention"
     "AUD3" = "Critical event alerting"
     "AUD4" = "Audit data integrity"
-    # Active Directory Security Controls (AD prefix) - zBang-inspired
+    # Active Directory Security Controls (AD prefix)
     "AD1" = "Shadow admin discovery"
     "AD2" = "Skeleton Key detection"
     "AD3" = "SID History analysis"
@@ -782,53 +704,6 @@ $script:CISControls = @{
     "AD5" = "Unconstrained delegation"
     "AD6" = "Constrained delegation with protocol transition"
     "AD7" = "Delegation privilege audit"
-    # Server Hardening Controls (HARD prefix) - CYBRHardeningCheck-inspired
-    "HARD1" = "Unnecessary server roles"
-    "HARD2" = "Screen saver configuration"
-    "HARD3" = "Advanced audit policy"
-    "HARD4" = "Remote Desktop hardening"
-    "HARD5" = "Registry permissions"
-    "HARD6" = "Registry auditing"
-    "HARD7" = "File system permissions"
-    "HARD8" = "File system auditing"
-    # Vault Hardening Controls (VAULT prefix)
-    "VAULT1" = "NIC hardening"
-    "VAULT2" = "Static IP configuration"
-    "VAULT3" = "Domain membership check"
-    "VAULT4" = "Logic Container service user"
-    "VAULT5" = "Firewall non-standard rules"
-    "VAULT6" = "Vault server certificate"
-    # CPM Hardening Controls (CPMH prefix)
-    "CPMH1" = "FIPS cryptography"
-    "CPMH2" = "DEP configuration"
-    "CPMH3" = "Credential file hardening"
-    "CPMH4" = "CPM service account configuration"
-    # PVWA Hardening Controls (PVWAH prefix)
-    "PVWAH1" = "IIS registry shares"
-    "PVWAH2" = "WebDAV disabled"
-    "PVWAH3" = "PVWA cryptography settings"
-    "PVWAH4" = "IIS MIME types"
-    "PVWAH5" = "Anonymous authentication disabled"
-    "PVWAH6" = "Application pool configuration"
-    "PVWAH7" = "Non-system drive installation"
-    "PVWAH8" = "Scheduled task service user"
-    # PSM Hardening Controls (PSMH prefix)
-    "PSMH1" = "PSM user configuration"
-    "PSMH2" = "Remote Desktop Users cleared"
-    "PSMH3" = "AppLocker rules"
-    "PSMH4" = "PSM drives hidden"
-    "PSMH5" = "IE tools blocked"
-    "PSMH6" = "RDS hardening"
-    "PSMH7" = "PSM user access hardening"
-    "PSMH8" = "SMB services hardening"
-    "PSMH9" = "Screen saver for PSM users"
-    "PSMH10" = "Out-of-domain configuration"
-    # Application Control Controls (APPCTL prefix) - Evasor-inspired
-    "APPCTL1" = "DLL injection vulnerability"
-    "APPCTL2" = "DLL hijacking risk"
-    "APPCTL3" = "Resource hijacking"
-    "APPCTL4" = "AppLocker bypass paths"
-    "APPCTL5" = "Writable system paths"
     # Enhanced Secrets Management Controls (SEC prefix)
     "SEC9" = "Conjur integration health"
     "SEC10" = "MAML policy validation"
@@ -840,21 +715,21 @@ $script:CISControls = @{
     "MID7" = "AIM Provider deployment"
     "MID8" = "AIM Provider configuration"
     "MID9" = "AIM Provider connectivity"
-    # Security Posture Expansion v4.3 - Secrets Hub Controls (SH prefix)
+    # Security Posture Expansion - Secrets Hub Controls (SH prefix)
     "SH1" = "Secrets Hub sync health"
     "SH2" = "Secrets Hub sync latency"
     "SH3" = "Secrets Hub version drift"
     "SH4" = "Secrets Hub sync failure rate"
     "SH5" = "Secrets Hub target configuration"
     "SH6" = "Secrets Hub audit logging"
-    # Security Posture Expansion v4.3 - Remote Access Controls (RA prefix)
+    # Security Posture Expansion - Remote Access Controls (RA prefix)
     "RA1" = "Alero invitation workflow"
     "RA2" = "Alero session time limits"
     "RA3" = "Alero biometric/device binding"
     "RA4" = "Alero audit log completeness"
     "RA5" = "Alero periodic access reviews"
     "RA6" = "Alero MFA enforcement"
-    # Security Posture Expansion v4.3 - Kubernetes Controls (K8S prefix)
+    # Security Posture Expansion - Kubernetes Controls (K8S prefix)
     "K8S1" = "Secrets Provider deployment mode"
     "K8S2" = "Pod security context"
     "K8S3" = "Service Account JWT authentication"
@@ -863,57 +738,57 @@ $script:CISControls = @{
     "K8S6" = "Mounted secret permissions"
     "K8S7" = "Conjur follower health"
     "K8S8" = "Kubernetes audit logging"
-    # Security Posture Expansion v4.3 - DevSecOps Controls (DSO prefix)
+    # Security Posture Expansion - DevSecOps Controls (DSO prefix)
     "DSO1" = "CI/CD secrets retrieval patterns"
     "DSO2" = "Pipeline secrets sprawl"
     "DSO3" = "Short-lived token usage"
     "DSO4" = "Pipeline audit logging"
     "DSO5" = "Secrets in build artifacts"
     "DSO6" = "Pipeline identity binding"
-    # Security Posture Expansion v4.3 - Privilege Cloud Controls (PC prefix)
+    # Security Posture Expansion - Privilege Cloud Controls (PC prefix)
     "PC1" = "Privilege Cloud connector health"
     "PC2" = "Identity Security Platform integration"
     "PC3" = "Privilege Cloud API security"
     "PC4" = "Privilege Cloud tenant isolation"
     "PC5" = "Cloud connector redundancy"
-    # Security Posture Expansion v4.3 - CyberArk Identity Controls (IDN prefix)
+    # Security Posture Expansion - CyberArk Identity Controls (IDN prefix)
     "IDN1" = "SSO integration with PVWA"
     "IDN2" = "Adaptive MFA policy"
     "IDN3" = "Identity lifecycle sync"
     "IDN4" = "Session risk scoring"
     "IDN5" = "Identity audit integration"
     "IDN6" = "Privileged app catalog policies"
-    # Security Posture Expansion v4.3 - Custom Plugins Controls (PLG prefix)
+    # Security Posture Expansion - Custom Plugins Controls (PLG prefix)
     "PLG1" = "Custom PSM connectors security"
     "PLG2" = "Custom CPM plugin injection risks"
     "PLG3" = "Unauthorized/outdated components"
     "PLG4" = "Plugin digital signature validation"
     "PLG5" = "Custom script file permissions"
-    # Security Posture Expansion v4.3 - Backup Security Controls (BKP prefix)
+    # Security Posture Expansion - Backup Security Controls (BKP prefix)
     "BKP1" = "Vault backup encryption"
     "BKP2" = "Backup file permissions"
     "BKP3" = "Backup in-transit encryption"
     "BKP4" = "Backup restoration testing"
     "BKP5" = "Backup retention policy"
-    # Security Posture Expansion v4.3 - HSM Integration Controls (HSM prefix)
+    # Security Posture Expansion - HSM Integration Controls (HSM prefix)
     "HSM1" = "HSM connectivity and health"
     "HSM2" = "HSM key wrapping configuration"
     "HSM3" = "HSM partition isolation"
     "HSM4" = "HSM firmware currency"
-    # Security Posture Expansion v4.3 - PTA Deep Dive Controls (PTAD prefix)
+    # Security Posture Expansion - PTA Deep Dive Controls (PTAD prefix)
     "PTAD1" = "PTA custom detection rules"
     "PTAD2" = "PTA ML model quality"
     "PTAD3" = "PTA alert fatigue (false positives)"
     "PTAD4" = "PTA detection rule coverage"
     "PTAD5" = "PTA UEBA integration"
     "PTAD6" = "PTA automated response actions"
-    # Security Posture Expansion v4.3 - Third-Party Integration Controls (TPI prefix)
+    # Security Posture Expansion - Third-Party Integration Controls (TPI prefix)
     "TPI1" = "ITSM (ServiceNow) integration"
     "TPI2" = "SOAR automated response playbooks"
     "TPI3" = "SIEM PAM event correlation"
     "TPI4" = "SIEM log forwarder health"
     "TPI5" = "Integration credential health"
-    # Security Posture Expansion v4.3 - Operational Hygiene Controls (OPS prefix)
+    # Security Posture Expansion - Operational Hygiene Controls (OPS prefix)
     "OPS1" = "Account onboarding queue metrics"
     "OPS2" = "CPM password change failure rates"
     "OPS3" = "PSM session success/failure ratios"
@@ -922,20 +797,20 @@ $script:CISControls = @{
     "OPS6" = "Vault utilization and capacity"
     "OPS7" = "License compliance"
     "OPS8" = "Component uptime"
-    # Security Posture Expansion v4.3 - Attack Path Simulation Controls (APS prefix)
+    # Security Posture Expansion - Attack Path Simulation Controls (APS prefix)
     "APS1" = "Workstation to PAM escalation"
     "APS2" = "Pass-the-Hash attack surface"
     "APS3" = "NTLM relay risks"
     "APS4" = "Cached credential extraction resilience"
     "APS5" = "Kerberoasting exposure"
     "APS6" = "Privilege escalation paths"
-    # Security Posture Expansion v4.3 - Supply Chain Integrity Controls (SCI prefix)
+    # Security Posture Expansion - Supply Chain Integrity Controls (SCI prefix)
     "SCI1" = "Component file hash validation"
     "SCI2" = "Patch currency"
     "SCI3" = "Third-party library vulnerabilities"
     "SCI4" = "Digital signature validation"
     "SCI5" = "Component origin verification"
-    # Security Posture Expansion v4.3 - Network Segmentation Controls (NSG prefix)
+    # Security Posture Expansion - Network Segmentation Controls (NSG prefix)
     "NSG1" = "Vault network isolation"
     "NSG2" = "PSM to Vault communication restrictions"
     "NSG3" = "PVWA to backend segmentation"
@@ -952,18 +827,18 @@ function Show-Banner {
         Displays the HuntCyberArk ASCII art banner
     #>
     Write-Host ""
-    
+
     # Use PowerShell native colors for maximum compatibility (works on PS 5.1+)
-    Write-Host "██╗  ██╗██╗   ██╗███╗   ██╗████████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗  █████╗ ██████╗ ██╗  ██╗" -ForegroundColor Magenta
-    Write-Host "██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝" -ForegroundColor Magenta
-    Write-Host "███████║██║   ██║██╔██╗ ██║   ██║   ██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝███████║██████╔╝█████╔╝ " -ForegroundColor Magenta
-    Write-Host "██╔══██║██║   ██║██║╚██╗██║   ██║   ██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗██╔══██║██╔══██╗██╔═██╗ " -ForegroundColor Magenta
-    Write-Host "██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗" -ForegroundColor Magenta
-    Write-Host "╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
+    Write-Host "  ██╗  ██╗██╗   ██╗███╗   ██╗████████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗  █████╗ ██████╗ ██╗  ██╗" -ForegroundColor Magenta
+    Write-Host "  ██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝" -ForegroundColor Magenta
+    Write-Host "  ███████║██║   ██║██╔██╗ ██║   ██║   ██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝███████║██████╔╝█████╔╝ " -ForegroundColor Magenta
+    Write-Host "  ██╔══██║██║   ██║██║╚██╗██║   ██║   ██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗██╔══██║██╔══██╗██╔═██╗ " -ForegroundColor Magenta
+    Write-Host "  ██║  ██║╚██████╔╝██║ ╚████║   ██║   ╚██████╗   ██║   ██████╔╝███████╗██║  ██║██║  ██║██║  ██║██║  ██╗" -ForegroundColor Magenta
+    Write-Host "  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
     Write-Host ""
-    Write-Host "    CyberArk PAM Security Configuration Audit" -ForegroundColor Yellow
+    Write-Host "    CyberArk PAM Security Audit - Red Team Edition" -ForegroundColor Yellow
     Write-Host "    https://logisek.com | info@logisek.com" -ForegroundColor DarkGray
-    Write-Host "    https://github.com/yourrepo/HuntCyberArk" -ForegroundColor DarkGray
+    Write-Host "    https://github.com/Logisek/HuntCyberArk" -ForegroundColor DarkGray
     Write-Host ""
 }
 #endregion
@@ -1006,7 +881,7 @@ function Test-Prerequisites {
     # Check for required modules (optional - will skip related checks if not available)
     $optionalModules = @(
         @{ Name = "NetSecurity"; Checks = "Windows Firewall checks"; InstallMethod = "WindowsFeature" },
-        @{ Name = "ActiveDirectory"; Checks = "AD security checks (zBang-style)"; InstallMethod = "RSAT" }
+        @{ Name = "ActiveDirectory"; Checks = "AD security checks"; InstallMethod = "RSAT" }
     )
     
     # Check if running as admin (needed for installing modules)
@@ -1105,13 +980,7 @@ function Test-Prerequisites {
     if ($tlsProtocols -notmatch "Tls12|Tls13") {
         $warnings += "TLS 1.2/1.3 not enabled by default in this PowerShell session"
     }
-    
-    # Check if running as admin (only relevant if local host checks are enabled)
-    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $isAdmin -and $IncludeLocalHostChecks) {
-        $warnings += "Not running as Administrator - local host security checks may fail"
-    }
-    
+
     # Output warnings
     if ($warnings.Count -gt 0) {
         Write-AuditLog "Prerequisites check completed with $($warnings.Count) warning(s):" -Level Warning
@@ -4942,7 +4811,7 @@ function Test-AdditionalCVEs {
             # Vulnerable versions will attempt to deserialize; patched versions reject
             if ($response.StatusCode -eq 200 -or $response.Content -match "SerializationException|TypeConfuseDelegate|BinaryFormatter") {
                 Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE16" `
+                    -CISControl "CVE17" `
                     -Finding "CVE-2018-9843: Potential deserialization RCE vulnerability" `
                     -Resource $endpoint `
                     -CurrentValue "Endpoint accepts serialized auth tokens" `
@@ -4955,7 +4824,7 @@ function Test-AdditionalCVEs {
             # Check error message for deserialization indicators
             if ($_.Exception.Message -match "SerializationException|deserialize|BinaryFormatter") {
                 Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE16" `
+                    -CISControl "CVE17" `
                     -Finding "CVE-2018-9843: Deserialization endpoint detected" `
                     -Resource $endpoint `
                     -CurrentValue "Endpoint attempts to deserialize tokens" `
@@ -5004,7 +4873,7 @@ function Test-AdditionalCVEs {
             # Check if XXE was processed (file content or error indicating entity processing)
             if ($response.Content -match "\[fonts\]|\[extensions\]|win\.ini|XXE|DOCTYPE|ENTITY") {
                 Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE17" `
+                    -CISControl "CVE18" `
                     -Finding "CVE-2019-7442: XXE vulnerability in SAML endpoint" `
                     -Resource $endpoint `
                     -CurrentValue "SAML endpoint processes external XML entities" `
@@ -5015,7 +4884,7 @@ function Test-AdditionalCVEs {
             elseif ($response.StatusCode -eq 200) {
                 # Endpoint exists and accepts SAML - worth noting
                 Add-Finding -Category "CVE Assessment" `
-                    -CISControl "CVE17" `
+                    -CISControl "CVE18" `
                     -Finding "SAML authentication endpoint detected (CVE-2019-7442 target)" `
                     -Resource $endpoint `
                     -CurrentValue "SAML endpoint accessible - verify version > 10.7" `
@@ -5049,7 +4918,7 @@ function Test-AdditionalCVEs {
             $tcpClient.EndConnect($asyncResult)
 
             Add-Finding -Category "CVE Assessment" `
-                -CISControl "CVE18" `
+                -CISControl "CVE19" `
                 -Finding "CVE-2018-9842: Vault port 1858 accessible (memory disclosure risk)" `
                 -Resource "${pvwaHost}:${vaultPort}" `
                 -CurrentValue "Vault proprietary protocol port is accessible from network" `
@@ -5375,6 +5244,274 @@ function Test-CVE2025SecretsManager {
         }
         catch { }
     }
+
+    # CVE-2025-49830 - Path Traversal and File Disclosure (High - CVSS 7.1)
+    # Test for path traversal in Secrets Manager API endpoints
+    Write-AuditLog "Checking for CVE-2025-49830 (Path Traversal)..." -Level Info
+    $pathTraversalPayloads = @(
+        @{ Path = "/api/v1/secrets/../../../etc/passwd"; Desc = "Unix path traversal" },
+        @{ Path = "/api/v1/secrets/..%2F..%2F..%2Fetc%2Fpasswd"; Desc = "URL-encoded traversal" },
+        @{ Path = "/api/v1/secrets/....//....//....//etc/passwd"; Desc = "Double dot bypass" },
+        @{ Path = "/api/v1/secrets/..;/..;/..;/etc/passwd"; Desc = "Semicolon bypass" },
+        @{ Path = "/api/v1/policies/../../../var/conjur/data"; Desc = "Data directory access" },
+        @{ Path = "/secrets?id=../../../etc/conjur.conf"; Desc = "Config file access" }
+    )
+
+    foreach ($payload in $pathTraversalPayloads) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            # Check if response contains file system indicators
+            if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+                if ($body -match "root:x:|nobody:|daemon:|conjur_key|database_url|authenticators:" -or
+                    $body -match "\[main\]|\[database\]|\[ssl\]" -or
+                    $body -match "BEGIN RSA|BEGIN PRIVATE KEY") {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE15" `
+                        -Finding "Path traversal vulnerability detected (CVE-2025-49830)" `
+                        -Resource "$PVWA$($payload.Path)" `
+                        -CurrentValue "Payload: $($payload.Desc) - File contents disclosed" `
+                        -ExpectedValue "Path traversal blocked" `
+                        -Recommendation "Apply patches for CVE-2025-49830 immediately - file disclosure vulnerability" `
+                        -Severity "High"
+                }
+            }
+        }
+        catch { }
+    }
+
+    # CVE-2025-49829 - Missing Validations (Moderate - CVSS 6.0)
+    # Test for missing input validation in Secrets Manager
+    Write-AuditLog "Checking for CVE-2025-49829 (Missing Validations)..." -Level Info
+    $validationPayloads = @(
+        @{ Path = "/api/v1/secrets"; Method = "POST"; Body = '{"id":""}'; Desc = "Empty ID" },
+        @{ Path = "/api/v1/secrets"; Method = "POST"; Body = '{"id":"' + ('A' * 10000) + '"}'; Desc = "Oversized ID" },
+        @{ Path = "/api/v1/secrets"; Method = "POST"; Body = '{"id":"test\x00null"}'; Desc = "Null byte injection" },
+        @{ Path = "/api/v1/policies"; Method = "POST"; Body = '{"policy":""}'; Desc = "Empty policy" },
+        @{ Path = "/api/v1/host-factory-tokens"; Method = "POST"; Body = '{"expiration":"invalid-date"}'; Desc = "Invalid date format" },
+        @{ Path = "/api/v1/roles"; Method = "POST"; Body = '{"role_id":"-1"}'; Desc = "Negative ID" }
+    )
+
+    foreach ($payload in $validationPayloads) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method $payload.Method -Body $payload.Body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            # Check if server accepts invalid input (should return 400 Bad Request)
+            if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 201) {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE16" `
+                    -Finding "Missing input validation detected (CVE-2025-49829)" `
+                    -Resource "$PVWA$($payload.Path)" `
+                    -CurrentValue "Accepted invalid input: $($payload.Desc)" `
+                    -ExpectedValue "Invalid input rejected with 400 Bad Request" `
+                    -Recommendation "Apply patches for CVE-2025-49829 - ensure proper input validation" `
+                    -Severity "Medium"
+            }
+        }
+        catch {
+            # A 500 error might also indicate validation issues
+            if ($_.Exception.Response.StatusCode.value__ -eq 500) {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE16" `
+                    -Finding "Server error on invalid input (CVE-2025-49829)" `
+                    -Resource "$PVWA$($payload.Path)" `
+                    -CurrentValue "Server returned 500 on: $($payload.Desc)" `
+                    -ExpectedValue "Proper validation with 400 Bad Request" `
+                    -Recommendation "Apply patches for CVE-2025-49829 - validate input before processing" `
+                    -Severity "Medium"
+            }
+        }
+    }
+}
+
+function Test-CVE202457967 {
+    # CVE-2024-57967: PVWA LDAP Mapping Elevated Privileges
+    # Product: CyberArk PAM Self-Hosted (PVWA) < 14.4
+    # CWE-266: Incorrect Privilege Assignment
+    # CVSS: 4.2 (Medium)
+    # Attack: Low-privileged users can view/modify LDAP directory mappings
+    Write-AuditLog "Testing CVE-2024-57967 (LDAP Mapping Privilege Escalation)..." -Level Info
+
+    $ldapEndpoints = @(
+        "/PasswordVault/API/Configuration/LDAP/Directories",
+        "/PasswordVault/api/Configuration/LDAP/Directories"
+    )
+
+    foreach ($endpoint in $ldapEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Check if LDAP configuration is exposed
+                if ($body -match '"DirectoryID"|"BindUsername"|"DomainName"|"Mappings"') {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE20" `
+                        -Finding "CVE-2024-57967: LDAP configuration endpoint accessible" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "LDAP directory configuration exposed" `
+                        -ExpectedValue "Endpoint restricted to high-privilege users only" `
+                        -Recommendation "Upgrade to PVWA 14.4+ and restrict LDAP configuration access to administrators" `
+                        -Severity "Medium"
+                }
+            }
+        }
+        catch { }
+    }
+}
+
+function Test-CVE202454840 {
+    # CVE-2024-54840: Host Header Injection in PVWA
+    # Product: CyberArk PAM Self-Hosted (PVWA) < 14.4
+    # CWE-644: Improper Neutralization of HTTP Headers
+    # CVSS: 4.2 (Medium)
+    # Attack: Inject malicious Host header to cause redirect to attacker-controlled site
+    Write-AuditLog "Testing CVE-2024-54840 (Host Header Injection)..." -Level Info
+
+    $testEndpoints = @(
+        "/PasswordVault/auth/",
+        "/PasswordVault/v10/",
+        "/PasswordVault/"
+    )
+
+    $attackerDomain = "attacker-test-domain.invalid"
+
+    foreach ($endpoint in $testEndpoints) {
+        try {
+            # Parse the PVWA URL to extract just the path
+            $pvwaUri = [System.Uri]$PVWA
+            $baseUrl = "$($pvwaUri.Scheme)://$($pvwaUri.Host)"
+            if ($pvwaUri.Port -ne 443 -and $pvwaUri.Port -ne 80) {
+                $baseUrl += ":$($pvwaUri.Port)"
+            }
+
+            # Create request with spoofed Host header
+            $headers = @{
+                "Host" = $attackerDomain
+            }
+
+            $response = Invoke-WebRequest -Uri "$baseUrl$endpoint" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -MaximumRedirection 0 -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Check redirect location in exception response
+            if ($_.Exception.Response -and $_.Exception.Response.Headers) {
+                $location = $_.Exception.Response.Headers["Location"]
+                if ($location -and $location -match $attackerDomain) {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE21" `
+                        -Finding "CVE-2024-54840: Host Header Injection vulnerability" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "Redirect to attacker domain: $location" `
+                        -ExpectedValue "Host header properly validated" `
+                        -Recommendation "Upgrade to PVWA 14.4+ to fix Host Header Injection vulnerability" `
+                        -Severity "Medium"
+                    return
+                }
+            }
+        }
+    }
+}
+
+function Test-CVE202222700 {
+    # CVE-2022-22700: Username Enumeration via X-CFY-TX-TM Header
+    # Product: CyberArk Identity <= 22.1
+    # CWE-203: Observable Discrepancy
+    # CVSS: 5.3 (Medium)
+    # Attack: X-CFY-TX-TM header timing differs between valid/invalid users
+    #         Valid user: X-CFY-TX-TM < 500, Invalid user: X-CFY-TX-TM > 1000
+    Write-AuditLog "Testing CVE-2022-22700 (Username Enumeration via X-CFY-TX-TM)..." -Level Info
+
+    $identityEndpoints = @(
+        "/Security/StartAuthentication",
+        "/identity/Security/StartAuthentication"
+    )
+
+    $pvwaHost = ([System.Uri]$PVWA).Host
+
+    foreach ($endpoint in $identityEndpoints) {
+        try {
+            # Test with likely invalid username
+            $testBody = @{
+                TenantId = "TestTenant"
+                User = "definitely_invalid_user_$(Get-Random)@test.invalid"
+                Version = "1.0"
+            } | ConvertTo-Json
+
+            $headers = @{
+                "X-IDAP-NATIVE-CLIENT" = "true"
+                "Content-Type" = "application/json"
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            # Check for X-CFY-TX-TM header presence
+            $txHeader = $response.Headers["X-CFY-TX-TM"]
+            if ($txHeader) {
+                Add-Finding -Category "CVE Assessment" `
+                    -CISControl "CVE22" `
+                    -Finding "CVE-2022-22700: CyberArk Identity timing header detected" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "X-CFY-TX-TM header present (value: $txHeader)" `
+                    -ExpectedValue "Timing header removed or consistent values" `
+                    -Recommendation "Upgrade CyberArk Identity to 22.2+ to fix username enumeration via timing" `
+                    -Severity "Medium"
+                break
+            }
+        }
+        catch { }
+    }
+}
+
+function Test-CVE202137151 {
+    # CVE-2021-37151: Username Enumeration via MFA Response Length
+    # Product: CyberArk Identity <= 21.5.131
+    # CWE-203: Observable Discrepancy
+    # CVSS: 5.3 (Medium)
+    # Attack: Response length differs - valid users get MFA challenges (larger response)
+    Write-AuditLog "Testing CVE-2021-37151 (Username Enumeration via Response Length)..." -Level Info
+
+    $identityEndpoints = @(
+        "/Security/StartAuthentication",
+        "/identity/Security/StartAuthentication"
+    )
+
+    foreach ($endpoint in $identityEndpoints) {
+        try {
+            # Test with known-format username (likely invalid)
+            $testBody = @{
+                TenantId = "TestTenant"
+                User = "test_invalid_$(Get-Random)@test.invalid"
+                Version = "1.0"
+            } | ConvertTo-Json
+
+            $headers = @{
+                "X-IDAP-NATIVE-CLIENT" = "true"
+                "Content-Type" = "application/json"
+            }
+
+            $response1 = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response1.StatusCode -eq 200) {
+                $responseContent = $response1.Content
+
+                # Check if response contains MFA challenge indicators
+                if ($responseContent -match '"Challenges"|"Mechanisms"|"StartTextOob"|"TextOob"') {
+                    Add-Finding -Category "CVE Assessment" `
+                        -CISControl "CVE23" `
+                        -Finding "CVE-2021-37151: CyberArk Identity authentication endpoint accessible" `
+                        -Resource "$PVWA$endpoint" `
+                        -CurrentValue "StartAuthentication responds with challenge info (potential user enumeration)" `
+                        -ExpectedValue "Consistent responses regardless of user validity" `
+                        -Recommendation "Upgrade CyberArk Identity to 21.11.133+ to fix response-based user enumeration" `
+                        -Severity "Medium"
+                    break
+                }
+            }
+        }
+        catch { }
+    }
 }
 
 function Test-PrototypePollution {
@@ -5404,6 +5541,1115 @@ function Test-PrototypePollution {
                     -ExpectedValue "__proto__ and constructor properties rejected" `
                     -Recommendation "Upgrade ag-grid to version 31.3.4+ or PVWA to latest version" `
                     -Severity "Medium"
+            }
+        }
+        catch { }
+    }
+}
+
+#======================================================================
+# ADDITIONAL SECURITY CHECKS (Non-CVE)
+#======================================================================
+
+function Test-UsernameEnumeration {
+    <#
+    .SYNOPSIS
+        Tests for username enumeration vulnerabilities in CyberArk Identity
+
+    .DESCRIPTION
+        CyberArk Identity â‰¤22.1 exposes X-CFY-TX-TM header that reveals user existence:
+        - Value < 500 = user exists
+        - Value > 1000 = user doesn't exist
+
+        Also tests response length/timing differences that leak user existence.
+        Reference: https://fluidattacks.com/advisories/porter
+    #>
+    Write-AuditLog "Testing for Username Enumeration vulnerabilities..." -Level Info
+
+    $identityEndpoints = @(
+        "/Security/StartAuthentication",
+        "/identity/Security/StartAuthentication",
+        "/CyberArk/Identity/Security/StartAuthentication",
+        "/oauth2/platformtoken"
+    )
+
+    # Test usernames
+    $testUsers = @(
+        @{ User = "administrator"; Exists = $true },
+        @{ User = "admin"; Exists = $true },
+        @{ User = "nonexistent_user_xyz_12345"; Exists = $false }
+    )
+
+    foreach ($endpoint in $identityEndpoints) {
+        $timingResults = @()
+
+        foreach ($testUser in $testUsers) {
+            try {
+                $body = @{
+                    User = $testUser.User
+                    Version = "1.0"
+                } | ConvertTo-Json
+
+                $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+                $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $stopwatch.Stop()
+
+                # Check X-CFY-TX-TM header
+                $txTmHeader = $response.Headers["X-CFY-TX-TM"]
+                if ($txTmHeader) {
+                    $txTmValue = [int]$txTmHeader
+
+                    $timingResults += @{
+                        User = $testUser.User
+                        ExpectedExists = $testUser.Exists
+                        TxTmValue = $txTmValue
+                        ResponseTime = $stopwatch.ElapsedMilliseconds
+                        ResponseLength = $response.Content.Length
+                    }
+
+                    # Check for enumeration indicator
+                    if (($txTmValue -lt 500 -and $testUser.Exists) -or ($txTmValue -gt 1000 -and -not $testUser.Exists)) {
+                        Add-Finding -Category "Authentication Security" `
+                            -CISControl "AUTH1" `
+                            -Finding "Username enumeration via X-CFY-TX-TM header" `
+                            -Resource $endpoint `
+                            -CurrentValue "X-CFY-TX-TM: $txTmValue for user '$($testUser.User)'" `
+                            -ExpectedValue "Consistent response times regardless of user existence" `
+                            -Recommendation "Upgrade CyberArk Identity to version > 22.1. Implement consistent response times." `
+                            -Severity "Medium"
+                        break
+                    }
+                }
+
+                # Check response length differences
+                if ($timingResults.Count -ge 2) {
+                    $existingUserLen = ($timingResults | Where-Object { $_.ExpectedExists }).ResponseLength
+                    $nonExistingUserLen = ($timingResults | Where-Object { -not $_.ExpectedExists }).ResponseLength
+
+                    if ($existingUserLen -and $nonExistingUserLen -and [Math]::Abs($existingUserLen - $nonExistingUserLen) -gt 50) {
+                        Add-Finding -Category "Authentication Security" `
+                            -CISControl "AUTH1" `
+                            -Finding "Username enumeration via response length difference" `
+                            -Resource $endpoint `
+                            -CurrentValue "Response length differs by $([Math]::Abs($existingUserLen - $nonExistingUserLen)) bytes" `
+                            -ExpectedValue "Consistent response lengths" `
+                            -Recommendation "Normalize response lengths for valid/invalid users" `
+                            -Severity "Medium"
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+}
+
+function Test-SecurityHeaders {
+    <#
+    .SYNOPSIS
+        Tests for missing or misconfigured security headers
+    #>
+    Write-AuditLog "Testing for Security Headers..." -Level Info
+
+    $testEndpoints = @(
+        "/PasswordVault/",
+        "/PasswordVault/v10/logon",
+        "/PasswordVault/api/auth",
+        "/",
+        "/identity/"
+    )
+
+    $requiredHeaders = @{
+        "Content-Security-Policy" = @{
+            Severity = "High"
+            Recommendation = "Implement CSP to prevent XSS attacks"
+        }
+        "X-Frame-Options" = @{
+            Severity = "Medium"
+            Recommendation = "Set to DENY or SAMEORIGIN to prevent clickjacking"
+        }
+        "X-Content-Type-Options" = @{
+            Severity = "Low"
+            Recommendation = "Set to 'nosniff' to prevent MIME-type sniffing"
+        }
+        "Strict-Transport-Security" = @{
+            Severity = "High"
+            Recommendation = "Enable HSTS with max-age >= 31536000"
+        }
+        "X-XSS-Protection" = @{
+            Severity = "Low"
+            Recommendation = "Set to '1; mode=block' (legacy browsers)"
+        }
+        "Referrer-Policy" = @{
+            Severity = "Low"
+            Recommendation = "Set to 'strict-origin-when-cross-origin' or stricter"
+        }
+        "Permissions-Policy" = @{
+            Severity = "Low"
+            Recommendation = "Restrict browser features not needed by application"
+        }
+    }
+
+    foreach ($endpoint in $testEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 302) {
+                $missingHeaders = @()
+
+                foreach ($header in $requiredHeaders.Keys) {
+                    if (-not $response.Headers[$header]) {
+                        $missingHeaders += $header
+                    }
+                }
+
+                if ($missingHeaders.Count -gt 0) {
+                    # Report high severity missing headers individually
+                    foreach ($missing in $missingHeaders) {
+                        $headerInfo = $requiredHeaders[$missing]
+                        if ($headerInfo.Severity -eq "High") {
+                            Add-Finding -Category "Security Headers" `
+                                -CISControl "HDR1" `
+                                -Finding "Missing security header: $missing" `
+                                -Resource $endpoint `
+                                -CurrentValue "Header not present" `
+                                -ExpectedValue "$missing header configured" `
+                                -Recommendation $headerInfo.Recommendation `
+                                -Severity $headerInfo.Severity
+                        }
+                    }
+
+                    # Summary finding for all missing headers
+                    if ($missingHeaders.Count -gt 2) {
+                        Add-Finding -Category "Security Headers" `
+                            -CISControl "HDR1" `
+                            -Finding "Multiple security headers missing ($($missingHeaders.Count) headers)" `
+                            -Resource $endpoint `
+                            -CurrentValue "Missing: $($missingHeaders -join ', ')" `
+                            -ExpectedValue "All security headers configured" `
+                            -Recommendation "Review OWASP Secure Headers guidelines" `
+                            -Severity "Medium"
+                    }
+                }
+
+                # Check for dangerous headers
+                if ($response.Headers["Server"]) {
+                    $serverHeader = $response.Headers["Server"]
+                    if ($serverHeader -match "IIS/[\d\.]+|Apache/[\d\.]+|nginx/[\d\.]+") {
+                        Add-Finding -Category "Information Disclosure" `
+                            -CISControl "HDR2" `
+                            -Finding "Server version disclosed in header" `
+                            -Resource $endpoint `
+                            -CurrentValue "Server: $serverHeader" `
+                            -ExpectedValue "Server header removed or generic" `
+                            -Recommendation "Remove or obfuscate Server header" `
+                            -Severity "Low"
+                    }
+                }
+
+                if ($response.Headers["X-Powered-By"]) {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "HDR2" `
+                        -Finding "X-Powered-By header discloses technology" `
+                        -Resource $endpoint `
+                        -CurrentValue "X-Powered-By: $($response.Headers["X-Powered-By"])" `
+                        -ExpectedValue "Header removed" `
+                        -Recommendation "Remove X-Powered-By header in IIS" `
+                        -Severity "Low"
+                }
+
+                if ($response.Headers["X-AspNet-Version"]) {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "HDR2" `
+                        -Finding "ASP.NET version disclosed" `
+                            -Resource $endpoint `
+                        -CurrentValue "X-AspNet-Version: $($response.Headers["X-AspNet-Version"])" `
+                        -ExpectedValue "Header removed" `
+                        -Recommendation "Disable X-AspNet-Version in web.config" `
+                        -Severity "Low"
+                }
+
+                break  # Only need to test one successful endpoint
+            }
+        }
+        catch { }
+    }
+}
+
+function Test-IISHardening {
+    <#
+    .SYNOPSIS
+        Tests for IIS hardening issues (WebDAV, HTTP methods, etc.)
+    #>
+    Write-AuditLog "Testing IIS Hardening..." -Level Info
+
+    # Test dangerous HTTP methods
+    $dangerousMethods = @("TRACE", "DEBUG", "PROPFIND", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "PROPPATCH")
+
+    foreach ($method in $dangerousMethods) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method $method -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -ne 405 -and $response.StatusCode -ne 501) {
+                $severity = if ($method -in @("TRACE", "DEBUG")) { "Medium" } else { "High" }
+
+                Add-Finding -Category "IIS Hardening" `
+                    -CISControl "IIS1" `
+                    -Finding "Dangerous HTTP method enabled: $method" `
+                    -Resource "/PasswordVault/" `
+                    -CurrentValue "Method $method returns $($response.StatusCode)" `
+                    -ExpectedValue "Method returns 405 Not Allowed" `
+                    -Recommendation "Disable $method method in IIS. For WebDAV methods, remove WebDAV role." `
+                    -Severity $severity
+            }
+        }
+        catch {
+            # 405 error is expected and good
+        }
+    }
+
+    # Test OPTIONS to enumerate allowed methods
+    try {
+        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method OPTIONS -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+        if ($response.Headers["Allow"]) {
+            $allowedMethods = $response.Headers["Allow"]
+            $dangerous = $dangerousMethods | Where-Object { $allowedMethods -match $_ }
+
+            if ($dangerous) {
+                Add-Finding -Category "IIS Hardening" `
+                    -CISControl "IIS1" `
+                    -Finding "OPTIONS reveals dangerous methods" `
+                    -Resource "/PasswordVault/" `
+                    -CurrentValue "Allow: $allowedMethods" `
+                    -ExpectedValue "Only GET, POST, HEAD allowed" `
+                    -Recommendation "Disable unnecessary HTTP methods" `
+                    -Severity "Medium"
+            }
+        }
+    }
+    catch { }
+
+    # Test for directory listing
+    $testDirs = @(
+        "/PasswordVault/scripts/",
+        "/PasswordVault/images/",
+        "/PasswordVault/css/",
+        "/PasswordVault/js/"
+    )
+
+    foreach ($dir in $testDirs) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$dir" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.Content -match "<title>.*Index of|Parent Directory|Directory Listing|<pre>.*href=") {
+                Add-Finding -Category "IIS Hardening" `
+                    -CISControl "IIS2" `
+                    -Finding "Directory listing enabled" `
+                    -Resource $dir `
+                    -CurrentValue "Directory contents visible" `
+                    -ExpectedValue "Directory browsing disabled" `
+                    -Recommendation "Disable directory browsing in IIS" `
+                    -Severity "Medium"
+            }
+        }
+        catch { }
+    }
+
+    # Test for detailed error messages
+    $errorTriggers = @(
+        "/PasswordVault/nonexistent.aspx",
+        "/PasswordVault/api/error?test='OR'1'='1",
+        "/PasswordVault/test.asp",
+        "/PasswordVault/../../../etc/passwd"
+    )
+
+    foreach ($trigger in $errorTriggers) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+        }
+        catch {
+            $errorContent = $_.Exception.Response
+            if ($errorContent) {
+                $reader = New-Object System.IO.StreamReader($errorContent.GetResponseStream())
+                $errorBody = $reader.ReadToEnd()
+
+                if ($errorBody -match "Stack Trace:|Exception Details:|Server Error in|Source Error:|at System\.|NullReferenceException|SqlException|OracleException") {
+                    Add-Finding -Category "IIS Hardening" `
+                        -CISControl "IIS3" `
+                        -Finding "Detailed error messages exposed" `
+                        -Resource $trigger `
+                        -CurrentValue "Stack trace or exception details visible" `
+                        -ExpectedValue "Generic error page only" `
+                        -Recommendation "Set customErrors mode='On' in web.config" `
+                        -Severity "Medium"
+                    break
+                }
+            }
+        }
+    }
+}
+
+function Test-APISecurityIssues {
+    <#
+    .SYNOPSIS
+        Tests for API security issues (Swagger exposure, CORS, rate limiting)
+    #>
+    Write-AuditLog "Testing API Security Issues..." -Level Info
+
+    # Test for exposed API documentation
+    $apiDocEndpoints = @(
+        "/swagger",
+        "/swagger/",
+        "/swagger/ui",
+        "/swagger/index.html",
+        "/swagger-ui/",
+        "/swagger-ui.html",
+        "/api-docs",
+        "/api-docs/",
+        "/openapi.json",
+        "/openapi.yaml",
+        "/v2/api-docs",
+        "/v3/api-docs",
+        "/PasswordVault/swagger",
+        "/PasswordVault/api/swagger",
+        "/docs",
+        "/redoc"
+    )
+
+    foreach ($endpoint in $apiDocEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200 -and $response.Content -match "swagger|openapi|paths|endpoints|api-docs") {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API6" `
+                    -Finding "API documentation exposed: $endpoint" `
+                    -Resource $endpoint `
+                    -CurrentValue "Swagger/OpenAPI docs accessible without auth" `
+                    -ExpectedValue "API documentation restricted or disabled in production" `
+                    -Recommendation "Disable Swagger UI in production or require authentication" `
+                    -Severity "Medium"
+                break
+            }
+        }
+        catch { }
+    }
+
+    # Test CORS configuration
+    $corsTestOrigins = @(
+        "https://evil.com",
+        "https://attacker.com",
+        "null"
+    )
+
+    foreach ($origin in $corsTestOrigins) {
+        try {
+            $headers = @{
+                "Origin" = $origin
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth" -Method OPTIONS -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            $acaoHeader = $response.Headers["Access-Control-Allow-Origin"]
+            $acacHeader = $response.Headers["Access-Control-Allow-Credentials"]
+
+            if ($acaoHeader -eq "*") {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API7" `
+                    -Finding "CORS allows any origin (wildcard)" `
+                    -Resource "/PasswordVault/api/" `
+                    -CurrentValue "Access-Control-Allow-Origin: *" `
+                    -ExpectedValue "Specific trusted origins only" `
+                    -Recommendation "Configure CORS to allow only trusted origins" `
+                    -Severity "High"
+                break
+            }
+            elseif ($acaoHeader -eq $origin -and $origin -ne "null") {
+                $severity = if ($acacHeader -eq "true") { "Critical" } else { "High" }
+                Add-Finding -Category "API Security" `
+                    -CISControl "API7" `
+                    -Finding "CORS reflects arbitrary origin" `
+                    -Resource "/PasswordVault/api/" `
+                    -CurrentValue "Reflects origin: $origin (Credentials: $acacHeader)" `
+                    -ExpectedValue "Only trusted origins allowed" `
+                    -Recommendation "Implement strict CORS origin validation" `
+                    -Severity $severity
+                break
+            }
+        }
+        catch { }
+    }
+
+    # Test for rate limiting on auth endpoint
+    Write-AuditLog "Testing API rate limiting..." -Level Info
+
+    $rateLimitEndpoints = @(
+        "/PasswordVault/api/auth/logon",
+        "/PasswordVault/v10/logon",
+        "/PasswordVault/WebServices/auth/Cyberark/CyberArkAuthenticationService.svc/Logon"
+    )
+
+    foreach ($endpoint in $rateLimitEndpoints) {
+        try {
+            $responses = @()
+            $testBody = '{"username":"ratelimit_test","password":"test123"}'
+
+            for ($i = 0; $i -lt 10; $i++) {
+                $start = Get-Date
+                try {
+                    $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $testBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 3 -ErrorAction SilentlyContinue
+                    $responses += @{ StatusCode = $response.StatusCode; Time = ((Get-Date) - $start).TotalMilliseconds }
+                }
+                catch {
+                    $responses += @{ StatusCode = 401; Time = ((Get-Date) - $start).TotalMilliseconds }
+                }
+            }
+
+            # If all 10 requests completed without 429 or significant delay
+            $avgTime = ($responses | Measure-Object -Property Time -Average).Average
+            $got429 = $responses | Where-Object { $_.StatusCode -eq 429 }
+
+            if (-not $got429 -and $responses.Count -eq 10 -and $avgTime -lt 1000) {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API8" `
+                    -Finding "No rate limiting on authentication endpoint" `
+                    -Resource $endpoint `
+                    -CurrentValue "10 requests in $([math]::Round($avgTime * 10))ms total, no 429 responses" `
+                    -ExpectedValue "Rate limiting (429) after 3-5 failed attempts" `
+                    -Recommendation "Implement rate limiting and account lockout on auth endpoints" `
+                    -Severity "High"
+                break
+            }
+        }
+        catch { }
+    }
+
+    # Test for GraphQL introspection
+    $graphqlEndpoints = @("/graphql", "/PasswordVault/graphql", "/api/graphql")
+
+    foreach ($endpoint in $graphqlEndpoints) {
+        try {
+            $introspectionQuery = '{"query":"{ __schema { types { name } } }"}'
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $introspectionQuery -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.Content -match "__schema|__type|queryType") {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API6" `
+                    -Finding "GraphQL introspection enabled" `
+                    -Resource $endpoint `
+                    -CurrentValue "Schema introspection allowed" `
+                    -ExpectedValue "Introspection disabled in production" `
+                    -Recommendation "Disable GraphQL introspection in production" `
+                    -Severity "Medium"
+            }
+        }
+        catch { }
+    }
+}
+
+function Test-AuthenticationWeaknesses {
+    <#
+    .SYNOPSIS
+        Tests for authentication weaknesses (JWT, session, cookies)
+    #>
+    Write-AuditLog "Testing Authentication Weaknesses..." -Level Info
+
+    # Test for JWT vulnerabilities
+    $jwtEndpoints = @(
+        "/PasswordVault/api/auth",
+        "/PasswordVault/v10/logon",
+        "/identity/api/oauth2/token"
+    )
+
+    # JWT with 'none' algorithm (unsigned)
+    $jwtNonePayload = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsImFkbWluIjp0cnVlLCJpYXQiOjE1MTYyMzkwMjJ9."
+
+    foreach ($endpoint in $jwtEndpoints) {
+        try {
+            $headers = @{
+                "Authorization" = "Bearer $jwtNonePayload"
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200) {
+                Add-Finding -Category "Authentication Security" `
+                    -CISControl "AUTH2" `
+                    -Finding "JWT 'none' algorithm accepted" `
+                    -Resource $endpoint `
+                    -CurrentValue "Unsigned JWT tokens accepted" `
+                    -ExpectedValue "Only signed tokens with strong algorithms accepted" `
+                    -Recommendation "Reject JWT tokens with 'none' algorithm. Use RS256 or ES256." `
+                    -Severity "Critical"
+            }
+        }
+        catch { }
+    }
+
+    # Test cookie security flags
+    try {
+        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -UseBasicParsing -TimeoutSec 10 -SessionVariable session -ErrorAction SilentlyContinue
+
+        if ($session.Cookies.Count -gt 0) {
+            foreach ($cookie in $session.Cookies.GetCookies("$PVWA")) {
+                $issues = @()
+
+                if (-not $cookie.Secure) {
+                    $issues += "Missing Secure flag"
+                }
+                if (-not $cookie.HttpOnly) {
+                    $issues += "Missing HttpOnly flag"
+                }
+
+                if ($issues.Count -gt 0) {
+                    Add-Finding -Category "Session Security" `
+                        -CISControl "AUTH3" `
+                        -Finding "Cookie '$($cookie.Name)' missing security flags" `
+                        -Resource "/PasswordVault/" `
+                        -CurrentValue $($issues -join ", ") `
+                        -ExpectedValue "Secure; HttpOnly; SameSite=Strict" `
+                        -Recommendation "Set Secure, HttpOnly, and SameSite flags on all cookies" `
+                        -Severity "Medium"
+                }
+            }
+        }
+    }
+    catch { }
+
+    # Test for session fixation
+    Write-AuditLog "Testing for session fixation..." -Level Info
+
+    try {
+        # Get initial session
+        $response1 = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -UseBasicParsing -TimeoutSec 10 -SessionVariable session1 -ErrorAction SilentlyContinue
+
+        $initialSessionId = ($session1.Cookies.GetCookies("$PVWA") | Where-Object { $_.Name -match "session|ASPX|token" }).Value
+
+        if ($initialSessionId) {
+            # Simulate login attempt (will fail but should rotate session)
+            $loginBody = '{"username":"test","password":"test"}'
+            try {
+                $response2 = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth/logon" -Method POST -Body $loginBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -WebSession $session1 -ErrorAction SilentlyContinue
+            }
+            catch { }
+
+            $postLoginSessionId = ($session1.Cookies.GetCookies("$PVWA") | Where-Object { $_.Name -match "session|ASPX|token" }).Value
+
+            if ($initialSessionId -eq $postLoginSessionId -and $initialSessionId) {
+                Add-Finding -Category "Session Security" `
+                    -CISControl "AUTH4" `
+                    -Finding "Potential session fixation vulnerability" `
+                    -Resource "/PasswordVault/" `
+                    -CurrentValue "Session ID not rotated after authentication attempt" `
+                    -ExpectedValue "New session ID issued after login" `
+                    -Recommendation "Regenerate session ID after successful authentication" `
+                    -Severity "Medium"
+            }
+        }
+    }
+    catch { }
+
+    # Test account lockout bypass via different usernames
+    Write-AuditLog "Testing account lockout policy..." -Level Info
+
+    $lockoutTestEndpoint = "/PasswordVault/api/auth/logon"
+    $testUsername = "lockout_test_user_$(Get-Random)"
+
+    try {
+        $lockoutDetected = $false
+
+        for ($i = 0; $i -lt 15; $i++) {
+            $loginBody = @{
+                username = $testUsername
+                password = "wrong_password_$i"
+            } | ConvertTo-Json
+
+            try {
+                $response = Invoke-WebRequest -Uri "$PVWA$lockoutTestEndpoint" -Method POST -Body $loginBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            }
+            catch {
+                if ($_.Exception.Response.StatusCode -eq 429 -or $_.Exception.Message -match "locked|blocked|too many") {
+                    $lockoutDetected = $true
+                    break
+                }
+            }
+        }
+
+        if (-not $lockoutDetected) {
+            Add-Finding -Category "Authentication Security" `
+                -CISControl "AUTH5" `
+                -Finding "Account lockout not triggered after 15 failed attempts" `
+                -Resource $lockoutTestEndpoint `
+                -CurrentValue "No lockout or rate limiting detected" `
+                -ExpectedValue "Account lockout after 3-5 failed attempts" `
+                -Recommendation "Implement account lockout policy with progressive delays" `
+                -Severity "High"
+        }
+    }
+    catch { }
+}
+
+function Test-InformationDisclosure {
+    <#
+    .SYNOPSIS
+        Tests for information disclosure vulnerabilities
+    #>
+    Write-AuditLog "Testing for Information Disclosure..." -Level Info
+
+    # Test for backup/config files
+    $sensitiveFiles = @(
+        "/web.config",
+        "/PasswordVault/web.config",
+        "/PasswordVault/web.config.bak",
+        "/PasswordVault/web.config.old",
+        "/PasswordVault/web.config.txt",
+        "/PasswordVault/web.config~",
+        "/.git/config",
+        "/.git/HEAD",
+        "/.svn/entries",
+        "/.env",
+        "/PasswordVault/.env",
+        "/config.json",
+        "/appsettings.json",
+        "/PasswordVault/appsettings.json",
+        "/PasswordVault/connectionstrings.config",
+        "/robots.txt",
+        "/sitemap.xml",
+        "/crossdomain.xml",
+        "/clientaccesspolicy.xml"
+    )
+
+    foreach ($file in $sensitiveFiles) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$file" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) {
+                $isSensitive = $false
+                $severity = "Low"
+
+                if ($file -match "\.config|\.env|appsettings|connection") {
+                    $isSensitive = $response.Content -match "connectionString|password|secret|apiKey|token"
+                    $severity = "Critical"
+                }
+                elseif ($file -match "\.git|\.svn") {
+                    $isSensitive = $true
+                    $severity = "High"
+                }
+                else {
+                    $isSensitive = $true
+                    $severity = "Low"
+                }
+
+                if ($isSensitive) {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "INFO1" `
+                        -Finding "Sensitive file accessible: $file" `
+                        -Resource $file `
+                        -CurrentValue "File accessible ($($response.Content.Length) bytes)" `
+                        -ExpectedValue "File not accessible (403/404)" `
+                        -Recommendation "Remove or restrict access to sensitive files" `
+                        -Severity $severity
+                }
+            }
+        }
+        catch { }
+    }
+
+    # Test for version disclosure in responses
+    $versionEndpoints = @(
+        "/PasswordVault/",
+        "/PasswordVault/api/server",
+        "/PasswordVault/api/version",
+        "/PasswordVault/v10/ServerInfo",
+        "/PasswordVault/WebServices/PIMServices.svc"
+    )
+
+    foreach ($endpoint in $versionEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.Content -match '"version"\s*:\s*"([\d\.]+)"|Version[:\s]+([\d\.]+)|CyberArk\s+([\d\.]+)') {
+                $version = $Matches[1] ?? $Matches[2] ?? $Matches[3]
+
+                Add-Finding -Category "Information Disclosure" `
+                    -CISControl "INFO2" `
+                    -Finding "CyberArk version disclosed: $version" `
+                    -Resource $endpoint `
+                    -CurrentValue "Version: $version" `
+                    -ExpectedValue "Version information not exposed" `
+                    -Recommendation "Remove version information from responses" `
+                    -Severity "Low"
+            }
+        }
+        catch { }
+    }
+
+    # Test for internal path disclosure
+    $pathTriggers = @(
+        "/PasswordVault/nonexistent$(Get-Random).aspx",
+        "/PasswordVault/api/error",
+        "/PasswordVault/'%20OR%20'1'='1"
+    )
+
+    foreach ($trigger in $pathTriggers) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+        }
+        catch {
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($stream)
+                $errorBody = $reader.ReadToEnd()
+
+                if ($errorBody -match '([A-Z]:\\[^<"\s]+)|(/var/[^<"\s]+)|(/opt/[^<"\s]+)|(/home/[^<"\s]+)') {
+                    Add-Finding -Category "Information Disclosure" `
+                        -CISControl "INFO3" `
+                        -Finding "Internal file path disclosed in error" `
+                        -Resource $trigger `
+                        -CurrentValue "Path exposed: $($Matches[0])" `
+                        -ExpectedValue "Generic error message only" `
+                        -Recommendation "Configure custom error pages without path information" `
+                        -Severity "Medium"
+                    break
+                }
+            }
+            catch { }
+        }
+    }
+}
+
+function Test-NetworkProtocolIssues {
+    <#
+    .SYNOPSIS
+        Tests for network/protocol vulnerabilities (Host header, open redirect, etc.)
+    #>
+    Write-AuditLog "Testing Network/Protocol Issues..." -Level Info
+
+    # Test Host Header Injection
+    Write-AuditLog "Testing Host Header Injection..." -Level Info
+
+    $maliciousHosts = @(
+        "evil.com",
+        "localhost",
+        "127.0.0.1",
+        "$([System.Uri]$PVWA).Host.evil.com"
+    )
+
+    foreach ($host in $maliciousHosts) {
+        try {
+            $headers = @{
+                "Host" = $host
+            }
+
+            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.Content -match $host -or $response.Headers["Location"] -match $host) {
+                Add-Finding -Category "Network Security" `
+                    -CISControl "NET8" `
+                    -Finding "Host header injection vulnerability" `
+                    -Resource "/PasswordVault/" `
+                    -CurrentValue "Injected host '$host' reflected in response" `
+                    -ExpectedValue "Host header validated against whitelist" `
+                    -Recommendation "Validate Host header against allowed hostnames" `
+                    -Severity "Medium"
+                break
+            }
+        }
+        catch { }
+    }
+
+    # Test Open Redirect
+    Write-AuditLog "Testing for Open Redirect..." -Level Info
+
+    $redirectParams = @("redirect", "url", "next", "return", "returnUrl", "goto", "destination", "target", "rurl", "redirect_uri")
+    $maliciousUrls = @("https://evil.com", "//evil.com", "https:evil.com", "/\\evil.com", "////evil.com")
+
+    foreach ($param in $redirectParams) {
+        foreach ($url in $maliciousUrls) {
+            try {
+                $testUrl = "$PVWA/PasswordVault/?$param=$([System.Web.HttpUtility]::UrlEncode($url))"
+
+                $response = Invoke-WebRequest -Uri $testUrl -Method GET -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction SilentlyContinue
+
+                if ($response.StatusCode -in @(301, 302, 303, 307, 308)) {
+                    $location = $response.Headers["Location"]
+                    if ($location -match "evil\.com") {
+                        Add-Finding -Category "Network Security" `
+                            -CISControl "NET9" `
+                            -Finding "Open redirect vulnerability via '$param' parameter" `
+                            -Resource "/PasswordVault/?$param=" `
+                            -CurrentValue "Redirects to: $location" `
+                            -ExpectedValue "Only internal redirects allowed" `
+                            -Recommendation "Validate redirect URLs against whitelist" `
+                            -Severity "Medium"
+                        break
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    # Test HTTP Request Smuggling indicators
+    Write-AuditLog "Testing for HTTP Request Smuggling indicators..." -Level Info
+
+    # CL.TE test
+    try {
+        $smuggleBody = "0`r`n`r`nGET /admin HTTP/1.1`r`nHost: localhost`r`n`r`n"
+        $headers = @{
+            "Content-Length" = "6"
+            "Transfer-Encoding" = "chunked"
+        }
+
+        $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method POST -Headers $headers -Body $smuggleBody -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+        # If we get an unexpected response, might indicate smuggling vulnerability
+        if ($response.StatusCode -eq 200 -and $response.Content -match "admin|forbidden|unauthorized") {
+            Add-Finding -Category "Network Security" `
+                -CISControl "NET10" `
+                -Finding "Potential HTTP Request Smuggling (CL.TE)" `
+                -Resource "/PasswordVault/" `
+                -CurrentValue "Server may be vulnerable to request smuggling" `
+                -ExpectedValue "Consistent handling of Content-Length and Transfer-Encoding" `
+                -Recommendation "Configure reverse proxy to normalize requests. Reject ambiguous requests." `
+                -Severity "High"
+        }
+    }
+    catch { }
+
+    # Test LDAP Injection in auth
+    Write-AuditLog "Testing for LDAP Injection..." -Level Info
+
+    $ldapPayloads = @(
+        "admin)(&(password=*))",
+        "admin)(|(password=*))",
+        "*)(uid=*))(|(uid=*",
+        "admin))%00"
+    )
+
+    foreach ($payload in $ldapPayloads) {
+        try {
+            $body = @{
+                username = $payload
+                password = "test"
+            } | ConvertTo-Json
+
+            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth/logon" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            # Check for LDAP error messages
+            if ($response.Content -match "LDAP|ldap|directory|DN=|distinguished name") {
+                Add-Finding -Category "Injection" `
+                    -CISControl "INJ1" `
+                    -Finding "Potential LDAP injection - LDAP error disclosed" `
+                    -Resource "/PasswordVault/api/auth/logon" `
+                    -CurrentValue "LDAP-related error message returned" `
+                    -ExpectedValue "Generic authentication error" `
+                    -Recommendation "Sanitize LDAP special characters in auth inputs" `
+                    -Severity "High"
+                break
+            }
+        }
+        catch { }
+    }
+}
+
+function Test-CyberArkSpecificIssues {
+    <#
+    .SYNOPSIS
+        Tests for CyberArk-specific security issues
+    #>
+    Write-AuditLog "Testing CyberArk-Specific Security Issues..." -Level Info
+
+    # Test CCP (Central Credential Provider) anonymous access
+    Write-AuditLog "Testing CCP anonymous access..." -Level Info
+
+    $ccpEndpoints = @(
+        "/AIMWebService/api/Accounts",
+        "/AIMWebService/v1.1/aim/accounts",
+        "/AIMWebService/api/Accounts?AppID=test&Safe=test&Object=test",
+        "/AIMWebService/v2/accounts"
+    )
+
+    foreach ($endpoint in $ccpEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200) {
+                # Check if actual credential data returned vs error
+                if ($response.Content -notmatch "error|Error|unauthorized|Unauthorized" -and $response.Content.Length -gt 50) {
+                    Add-Finding -Category "CyberArk Security" `
+                        -CISControl "CA1" `
+                        -Finding "CCP endpoint accessible without authentication" `
+                        -Resource $endpoint `
+                        -CurrentValue "CCP returns data without credentials" `
+                        -ExpectedValue "CCP requires application authentication" `
+                        -Recommendation "Configure CCP with client certificate or IP restrictions" `
+                        -Severity "Critical"
+                    break
+                }
+            }
+        }
+        catch { }
+    }
+
+    # Test for exposed PVWA internal endpoints
+    Write-AuditLog "Testing PVWA internal endpoint exposure..." -Level Info
+
+    $internalEndpoints = @(
+        "/PasswordVault/api/ComponentsMonitoringDetails",
+        "/PasswordVault/api/Configuration",
+        "/PasswordVault/api/server",
+        "/PasswordVault/api/Platforms",
+        "/PasswordVault/api/LiveSessions",
+        "/PasswordVault/api/RecordingActivities",
+        "/PasswordVault/v10/Configuration/LDAP",
+        "/PasswordVault/v10/Configuration/SAML",
+        "/PasswordVault/API/Accounts?limit=1000",
+        "/PasswordVault/WebServices/PIMServices.svc/Safes"
+    )
+
+    foreach ($endpoint in $internalEndpoints) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200) {
+                $content = $response.Content
+
+                # Skip login pages and error responses
+                if ($content -match "<!DOCTYPE|<html|login|Login|Sign in" -and $content -notmatch '"[Ss]afes"|"[Aa]ccounts"|"[Pp]latforms"') {
+                    continue
+                }
+
+                if ($content.Length -gt 100 -and ($content -match '"[Ss]afes"|"[Aa]ccounts"|"[Pp]latforms"|"[Uu]sers"|"[Cc]onfiguration"|"[Ll]ive[Ss]ession"')) {
+                    Add-Finding -Category "CyberArk Security" `
+                        -CISControl "CA2" `
+                        -Finding "Internal PVWA endpoint accessible without auth" `
+                        -Resource $endpoint `
+                        -CurrentValue "Endpoint returns sensitive data ($($content.Length) bytes)" `
+                        -ExpectedValue "Requires authentication" `
+                        -Recommendation "Ensure all API endpoints require authentication" `
+                        -Severity "High"
+                }
+            }
+        }
+        catch { }
+    }
+
+    # Test Vault port exposure (1858)
+    Write-AuditLog "Testing Vault port (1858) exposure..." -Level Info
+
+    $pvwaHost = ([System.Uri]$PVWA).Host
+
+    try {
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $asyncResult = $tcpClient.BeginConnect($pvwaHost, 1858, $null, $null)
+        $waitResult = $asyncResult.AsyncWaitHandle.WaitOne(3000, $false)
+
+        if ($waitResult -and $tcpClient.Connected) {
+            $tcpClient.EndConnect($asyncResult)
+            $tcpClient.Close()
+
+            Add-Finding -Category "CyberArk Security" `
+                -CISControl "CA3" `
+                -Finding "Vault port 1858 accessible from scanner network" `
+                -Resource "${pvwaHost}:1858" `
+                -CurrentValue "Port 1858 responds to connections" `
+                -ExpectedValue "Port 1858 firewalled from untrusted networks" `
+                -Recommendation "Restrict Vault port access to authorized component servers only" `
+                -Severity "High"
+        }
+    }
+    catch { }
+
+    # Test PSM RDP port exposure (3389)
+    Write-AuditLog "Testing PSM RDP port (3389) exposure..." -Level Info
+
+    try {
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $asyncResult = $tcpClient.BeginConnect($pvwaHost, 3389, $null, $null)
+        $waitResult = $asyncResult.AsyncWaitHandle.WaitOne(3000, $false)
+
+        if ($waitResult -and $tcpClient.Connected) {
+            $tcpClient.EndConnect($asyncResult)
+            $tcpClient.Close()
+
+            Add-Finding -Category "CyberArk Security" `
+                -CISControl "CA4" `
+                -Finding "PSM RDP port 3389 accessible" `
+                -Resource "${pvwaHost}:3389" `
+                -CurrentValue "RDP port open to scanner" `
+                -ExpectedValue "RDP access through PVWA only (HTML5 gateway)" `
+                -Recommendation "Restrict RDP access via network segmentation. Use HTML5 gateway." `
+                -Severity "Medium"
+        }
+    }
+    catch { }
+
+    # Test for exposed credential files
+    Write-AuditLog "Testing for exposed credential files..." -Level Info
+
+    $credFilePaths = @(
+        "/PasswordVault/credfiles/",
+        "/CredFiles/",
+        "/AppCredentials/",
+        "/.cred",
+        "/PasswordVault/vault.ini",
+        "/vault.ini"
+    )
+
+    foreach ($path in $credFilePaths) {
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA$path" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
+            if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) {
+                if ($response.Content -match "\.cred|Password|Credential|vault|VAULT") {
+                    Add-Finding -Category "CyberArk Security" `
+                        -CISControl "CA5" `
+                        -Finding "Credential file path accessible: $path" `
+                        -Resource $path `
+                        -CurrentValue "Path returns content" `
+                        -ExpectedValue "Path not accessible via web" `
+                        -Recommendation "Remove web access to credential file directories" `
+                        -Severity "Critical"
+                }
+            }
+        }
+        catch { }
+    }
+
+    # Test PSMP SSH recording bypass (CVE-2020 related)
+    Write-AuditLog "Testing for PSMP endpoint exposure..." -Level Info
+
+    $psmpPorts = @(22, 2222)
+
+    foreach ($port in $psmpPorts) {
+        try {
+            $tcpClient = New-Object System.Net.Sockets.TcpClient
+            $asyncResult = $tcpClient.BeginConnect($pvwaHost, $port, $null, $null)
+            $waitResult = $asyncResult.AsyncWaitHandle.WaitOne(3000, $false)
+
+            if ($waitResult -and $tcpClient.Connected) {
+                $tcpClient.EndConnect($asyncResult)
+
+                # Try to read SSH banner
+                $stream = $tcpClient.GetStream()
+                $stream.ReadTimeout = 3000
+                $buffer = New-Object byte[] 256
+                $read = $stream.Read($buffer, 0, 256)
+                $banner = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
+
+                $tcpClient.Close()
+
+                if ($banner -match "SSH|PSMP|CyberArk") {
+                    Add-Finding -Category "CyberArk Security" `
+                        -CISControl "CA6" `
+                        -Finding "PSMP SSH port accessible: ${pvwaHost}:${port}" `
+                        -Resource "${pvwaHost}:${port}" `
+                        -CurrentValue "SSH banner: $($banner.Trim())" `
+                        -ExpectedValue "PSMP accessed through PVWA only" `
+                        -Recommendation "If PSMP < 11.1, recording bypass may be possible. Upgrade and restrict network access." `
+                        -Severity "Medium"
+                }
             }
         }
         catch { }
@@ -6164,370 +7410,6 @@ function Test-AdvancedSecurityChecks {
     }
 }
 
-#======================================================================
-# HOST SECURITY CHECKS (Local Execution)
-#======================================================================
-
-function Test-HostSecurity {
-    Write-AuditLog "Checking host security (requires local execution on CyberArk server)..." -Level Info
-
-    # These checks only work when run locally on a CyberArk server
-    $isLocalCyberArk = Test-Path "C:\Program Files (x86)\CyberArk" -ErrorAction SilentlyContinue
-
-    if (-not $isLocalCyberArk) {
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST1" `
-            -CheckName "Windows Firewall Check" `
-            -Reason "Not running on CyberArk server - requires local execution" `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST2" `
-            -CheckName "Service Account Check" `
-            -Reason "Not running on CyberArk server - requires local execution" `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST3" `
-            -CheckName "Credential Caching Check" `
-            -Reason "Not running on CyberArk server - requires local execution" `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST4" `
-            -CheckName "Event Log Configuration Check" `
-            -Reason "Not running on CyberArk server - requires local execution" `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST5" `
-            -CheckName "Antivirus/EDR Status Check" `
-            -Reason "Not running on CyberArk server - requires local execution" `
-            -Type "NotApplicable"
-        return
-    }
-
-    try { Test-WindowsFirewall } catch { Add-SkippedCheck -Category "Host Security" -CISControl "HOST1" -CheckName "Windows Firewall" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-ServiceAccounts } catch { Add-SkippedCheck -Category "Host Security" -CISControl "HOST2" -CheckName "Service Accounts" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-CredentialCaching } catch { Add-SkippedCheck -Category "Host Security" -CISControl "HOST3" -CheckName "Credential Caching" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-EventLogConfiguration } catch { Add-SkippedCheck -Category "Host Security" -CISControl "HOST4" -CheckName "Event Log Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-AntivirusStatus } catch { Add-SkippedCheck -Category "Host Security" -CISControl "HOST5" -CheckName "Antivirus Status" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-CyberArkServices } catch { Add-SkippedCheck -Category "CyberArk Services" -CISControl "7.3" -CheckName "CyberArk Services" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-}
-
-function Test-WindowsFirewall {
-    Write-AuditLog "Checking Windows Firewall configuration..." -Level Info
-
-    try {
-        $firewallProfiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
-
-        foreach ($fwProfile in $firewallProfiles) {
-            if (-not $fwProfile.Enabled) {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST1" `
-                    -Finding "Windows Firewall disabled" `
-                    -Resource "Firewall Profile: $($fwProfile.Name)" `
-                    -CurrentValue "Disabled" `
-                    -ExpectedValue "Enabled" `
-                    -Recommendation "Enable Windows Firewall for all profiles" `
-                    -Severity "Critical"
-            }
-
-            if ($fwProfile.DefaultInboundAction -ne "Block") {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST1" `
-                    -Finding "Firewall default inbound not set to Block" `
-                    -Resource "Firewall Profile: $($fwProfile.Name)" `
-                    -CurrentValue $fwProfile.DefaultInboundAction `
-                    -ExpectedValue "Block" `
-                    -Recommendation "Set default inbound action to Block" `
-                    -Severity "High"
-            }
-        }
-
-        # Check for overly permissive rules
-        $anyAnyRules = Get-NetFirewallRule -Enabled True -Direction Inbound | Where-Object {
-            $portFilter = $_ | Get-NetFirewallPortFilter
-            $addressFilter = $_ | Get-NetFirewallAddressFilter
-            $portFilter.LocalPort -eq "Any" -and $addressFilter.RemoteAddress -eq "Any"
-        }
-
-        if ($anyAnyRules.Count -gt 0) {
-            Add-Finding -Category "Host Security" `
-                -CISControl "HOST1" `
-                -Finding "Overly permissive firewall rules detected" `
-                -Resource "Windows Firewall" `
-                -CurrentValue "$($anyAnyRules.Count) rules allow any port from any address" `
-                -ExpectedValue "Restrictive rules only" `
-                -Recommendation "Review and restrict firewall rules" `
-                -Severity "High"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST1" `
-            -CheckName "Windows Firewall Check" `
-            -Reason "Could not check Windows Firewall: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-ServiceAccounts {
-    Write-AuditLog "Checking CyberArk service account configurations..." -Level Info
-
-    $cyberArkServices = @(
-        "CyberArk Central Policy Manager Scanner",
-        "CyberArk Password Manager",
-        "CyberArk Vault Disaster Recovery",
-        "CyberArk Event Notification Engine",
-        "CyberArk Privileged Session Manager",
-        "PrivateArk Server",
-        "PrivateArk Database",
-        "PrivateArk Remote Control Agent"
-    )
-
-    foreach ($serviceName in $cyberArkServices) {
-        try {
-            $service = Get-WmiObject -Class Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
-
-            if ($service) {
-                $serviceAccount = $service.StartName
-
-                # Check if running as LocalSystem (not recommended for some services)
-                if ($serviceAccount -eq "LocalSystem" -and $serviceName -notmatch "PrivateArk") {
-                    Add-Finding -Category "Host Security" `
-                        -CISControl "HOST2" `
-                        -Finding "Service running as LocalSystem" `
-                        -Resource "Service: $serviceName" `
-                        -CurrentValue $serviceAccount `
-                        -ExpectedValue "Dedicated service account" `
-                        -Recommendation "Use a dedicated service account with minimal privileges" `
-                        -Severity "Medium"
-                }
-
-                # Check for interactive services
-                if ($service.DesktopInteract) {
-                    Add-Finding -Category "Host Security" `
-                        -CISControl "HOST2" `
-                        -Finding "Service allows desktop interaction" `
-                        -Resource "Service: $serviceName" `
-                        -CurrentValue "Desktop interaction enabled" `
-                        -ExpectedValue "No desktop interaction" `
-                        -Recommendation "Disable desktop interaction for services" `
-                        -Severity "Medium"
-                }
-            }
-        }
-        catch { }
-    }
-}
-
-function Test-CredentialCaching {
-    Write-AuditLog "Checking credential caching configuration..." -Level Info
-
-    try {
-        # Check cached logons count
-        $cachedLogons = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "CachedLogonsCount" -ErrorAction SilentlyContinue).CachedLogonsCount
-
-        if ($cachedLogons -and [int]$cachedLogons -gt 0) {
-            Add-Finding -Category "Host Security" `
-                -CISControl "HOST3" `
-                -Finding "Credential caching enabled" `
-                -Resource "Windows Credential Cache" `
-                -CurrentValue "$cachedLogons cached logons allowed" `
-                -ExpectedValue "0 (disabled on servers)" `
-                -Recommendation "Disable credential caching on CyberArk servers" `
-                -Severity "High"
-        }
-
-        # Check WDigest
-        $wdigest = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest" -Name "UseLogonCredential" -ErrorAction SilentlyContinue).UseLogonCredential
-
-        if ($wdigest -eq 1) {
-            Add-Finding -Category "Host Security" `
-                -CISControl "HOST3" `
-                -Finding "WDigest authentication enabled" `
-                -Resource "Windows Security" `
-                -CurrentValue "WDigest enabled (cleartext passwords in memory)" `
-                -ExpectedValue "WDigest disabled" `
-                -Recommendation "Disable WDigest to prevent credential theft" `
-                -Severity "Critical"
-        }
-
-        # Check LSA Protection
-        $lsaProtection = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -ErrorAction SilentlyContinue).RunAsPPL
-
-        if ($lsaProtection -ne 1) {
-            Add-Finding -Category "Host Security" `
-                -CISControl "HOST3" `
-                -Finding "LSA Protection not enabled" `
-                -Resource "Windows Security" `
-                -CurrentValue "LSA Protection disabled" `
-                -ExpectedValue "LSA Protection enabled" `
-                -Recommendation "Enable LSA Protection (RunAsPPL)" `
-                -Severity "High"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST3" `
-            -CheckName "Credential Caching Check" `
-            -Reason "Could not check credential caching: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-EventLogConfiguration {
-    Write-AuditLog "Checking Windows Event Log configuration..." -Level Info
-
-    try {
-        $securityLog = Get-WinEvent -ListLog Security -ErrorAction SilentlyContinue
-
-        if ($securityLog) {
-            # Check log size
-            $logSizeMB = [math]::Round($securityLog.MaximumSizeInBytes / 1MB, 2)
-            if ($logSizeMB -lt 1024) {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST4" `
-                    -Finding "Security log size too small" `
-                    -Resource "Windows Security Event Log" `
-                    -CurrentValue "$logSizeMB MB" `
-                    -ExpectedValue "1024 MB or more" `
-                    -Recommendation "Increase security log size for forensic retention" `
-                    -Severity "Medium"
-            }
-
-            # Check retention
-            if ($securityLog.LogMode -ne "Circular") {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST4" `
-                    -Finding "Security log not set to circular mode" `
-                    -Resource "Windows Security Event Log" `
-                    -CurrentValue $securityLog.LogMode `
-                    -ExpectedValue "Circular with adequate size" `
-                    -Recommendation "Configure appropriate log retention" `
-                    -Severity "Low"
-            }
-        }
-
-        # Check if audit policies are configured
-        $auditCategories = @(
-            "Account Logon",
-            "Account Management",
-            "Logon/Logoff",
-            "Object Access",
-            "Policy Change",
-            "Privilege Use",
-            "System"
-        )
-
-        foreach ($category in $auditCategories) {
-            $auditPolicy = auditpol /get /category:$category 2>$null
-
-            if ($auditPolicy -match "No Auditing") {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST4" `
-                    -Finding "Audit policy not configured" `
-                    -Resource "Audit Category: $category" `
-                    -CurrentValue "No Auditing" `
-                    -ExpectedValue "Success and Failure" `
-                    -Recommendation "Enable auditing for $category" `
-                    -Severity "High"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST4" `
-            -CheckName "Event Log Configuration Check" `
-            -Reason "Could not check event log configuration: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-AntivirusStatus {
-    Write-AuditLog "Checking antivirus/EDR status..." -Level Info
-
-    try {
-        # Check Windows Defender status
-        $defenderStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
-
-        if ($defenderStatus) {
-            if (-not $defenderStatus.AntivirusEnabled) {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST5" `
-                    -Finding "Windows Defender antivirus disabled" `
-                    -Resource "Windows Defender" `
-                    -CurrentValue "Disabled" `
-                    -ExpectedValue "Enabled" `
-                    -Recommendation "Enable antivirus protection" `
-                    -Severity "Critical"
-            }
-
-            if (-not $defenderStatus.RealTimeProtectionEnabled) {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST5" `
-                    -Finding "Real-time protection disabled" `
-                    -Resource "Windows Defender" `
-                    -CurrentValue "Disabled" `
-                    -ExpectedValue "Enabled" `
-                    -Recommendation "Enable real-time protection" `
-                    -Severity "Critical"
-            }
-
-            # Check signature age
-            $signatureAge = (Get-Date) - $defenderStatus.AntivirusSignatureLastUpdated
-            if ($signatureAge.TotalDays -gt 7) {
-                Add-Finding -Category "Host Security" `
-                    -CISControl "HOST5" `
-                    -Finding "Antivirus signatures outdated" `
-                    -Resource "Windows Defender" `
-                    -CurrentValue "$([math]::Round($signatureAge.TotalDays)) days old" `
-                    -ExpectedValue "Updated within 7 days" `
-                    -Recommendation "Update antivirus signatures" `
-                    -Severity "High"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST5" `
-            -CheckName "Antivirus Status Check" `
-            -Reason "Could not check antivirus status: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-CyberArkServices {
-    Write-AuditLog "Checking CyberArk service status and configuration..." -Level Info
-
-    $criticalServices = @(
-        @{ Name = "PrivateArk Server"; Critical = $true },
-        @{ Name = "PrivateArk Database"; Critical = $true },
-        @{ Name = "CyberArk Password Manager"; Critical = $false },
-        @{ Name = "CyberArk Central Policy Manager Scanner"; Critical = $false },
-        @{ Name = "CyberArk Vault Disaster Recovery"; Critical = $false }
-    )
-
-    foreach ($svcInfo in $criticalServices) {
-        try {
-            $service = Get-Service -Name $svcInfo.Name -ErrorAction SilentlyContinue
-
-            if ($service) {
-                if ($service.Status -ne "Running") {
-                    $severity = if ($svcInfo.Critical) { "Critical" } else { "High" }
-                    Add-Finding -Category "CyberArk Services" `
-                        -CISControl "7.3" `
-                        -Finding "CyberArk service not running" `
-                        -Resource $svcInfo.Name `
-                        -CurrentValue $service.Status `
-                        -ExpectedValue "Running" `
-                        -Recommendation "Start the $($svcInfo.Name) service" `
-                        -Severity $severity
-                }
-
-                if ($service.StartType -ne "Automatic") {
-                    Add-Finding -Category "CyberArk Services" `
-                        -CISControl "7.3" `
-                        -Finding "Service not set to automatic start" `
-                        -Resource $svcInfo.Name `
-                        -CurrentValue $service.StartType `
-                        -ExpectedValue "Automatic" `
-                        -Recommendation "Set service to start automatically" `
-                        -Severity "Medium"
-                }
-            }
-        }
-        catch { }
-    }
-}
 
 function Test-ComponentVersions {
     Write-AuditLog "Detecting CyberArk component versions..." -Level Info
@@ -8922,11 +9804,11 @@ function Test-AuditDataIntegrity {
 }
 
 #======================================================================
-# ACTIVE DIRECTORY SECURITY CHECKS (AD1-AD7) - zBang-inspired
+# ACTIVE DIRECTORY SECURITY CHECKS (AD1-AD7)
 #======================================================================
 
 function Test-ADSecurity {
-    Write-AuditLog "Running Active Directory Security Checks (zBang-inspired)..." -Level Info
+    Write-AuditLog "Running Active Directory Security Checks..." -Level Info
 
     # Check if we can connect to AD
     try {
@@ -9467,2035 +10349,6 @@ function Test-DelegationPrivilegeAudit {
     }
 }
 
-#======================================================================
-# SERVER HARDENING CHECKS (HARD1-HARD8) - CYBRHardeningCheck-inspired
-#======================================================================
-
-function Test-ServerHardening {
-    Write-AuditLog "Running Server Hardening Checks (CYBRHardeningCheck-inspired)..." -Level Info
-
-    Test-UnnecessaryServerRoles
-    Test-ScreenSaverConfiguration
-    Test-AdvancedAuditPolicyConfig
-    Test-RemoteDesktopHardening
-    Test-RegistryPermissions
-    Test-RegistryAuditing
-    Test-FileSystemPermissions
-    Test-FileSystemAuditing
-}
-
-function Test-UnnecessaryServerRoles {
-    Write-AuditLog "Checking for unnecessary server roles (HARD1)..." -Level Info
-
-    try {
-        # Detect if running on Windows Server or Windows Client
-        $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-        
-        # Default to workstation if we can't determine OS type (ProductType: 1=Workstation, 2=DC, 3=Server)
-        $isServer = $false
-        if ($osInfo -and $osInfo.ProductType) {
-            $isServer = $osInfo.ProductType -ne 1
-        }
-        
-        if (-not $isServer) {
-            # Windows Client - use Get-WindowsOptionalFeature for feature detection
-            Write-AuditLog "Running on Windows Client - checking optional features instead of server roles" -Level Info
-            
-            # Map server roles to Windows optional features where applicable
-            $unnecessaryFeatures = @(
-                @{ Name = "IIS-WebServer"; Description = "IIS Web Server" },
-                @{ Name = "Microsoft-Hyper-V-All"; Description = "Hyper-V" },
-                @{ Name = "TelnetClient"; Description = "Telnet Client" },
-                @{ Name = "TFTP"; Description = "TFTP Client" },
-                @{ Name = "SMB1Protocol"; Description = "SMB 1.0 Protocol" }
-            )
-            
-            $foundUnnecessary = @()
-            $isPVWA = Test-Path "C:\inetpub\wwwroot\PasswordVault" -ErrorAction SilentlyContinue
-            
-            foreach ($feature in $unnecessaryFeatures) {
-                $installed = Get-WindowsOptionalFeature -Online -FeatureName $feature.Name -ErrorAction SilentlyContinue
-                if ($installed -and $installed.State -eq "Enabled") {
-                    # Allow IIS on PVWA
-                    if ($feature.Name -eq "IIS-WebServer" -and $isPVWA) { continue }
-                    $foundUnnecessary += $feature.Description
-                }
-            }
-            
-            if ($foundUnnecessary.Count -gt 0) {
-                Add-Finding -Category "Server Hardening" `
-                    -CISControl "HARD1" `
-                    -Finding "Unnecessary Windows features enabled" `
-                    -Resource "Windows Optional Features" `
-                    -CurrentValue "$($foundUnnecessary.Count) features: $($foundUnnecessary -join ', ')" `
-                    -ExpectedValue "Minimal features for CyberArk function" `
-                    -Recommendation "Disable unnecessary features to reduce attack surface" `
-                    -Severity "Medium"
-            }
-            else {
-                Add-Finding -Category "Server Hardening" `
-                    -CISControl "HARD1" `
-                    -Finding "Windows features appropriately configured" `
-                    -Resource "Windows Optional Features" `
-                    -CurrentValue "No unnecessary features detected" `
-                    -ExpectedValue "Minimal features" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-            return
-        }
-        
-        # Windows Server - use Get-WindowsFeature
-        # Check if Get-WindowsFeature cmdlet is available
-        if (-not (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue)) {
-            Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" `
-                -CheckName "Unnecessary Server Roles" `
-                -Reason "Get-WindowsFeature cmdlet not available (ServerManager module not installed)" `
-                -Type "NotApplicable"
-            return
-        }
-        
-        # Roles that should NOT be installed on CyberArk servers
-        $unnecessaryRoles = @(
-            "Web-Server",           # IIS (unless PVWA)
-            "DNS",                  # DNS Server
-            "DHCP",                 # DHCP Server
-            "Fax",                  # Fax Server
-            "Print-Services",       # Print Server
-            "NPAS",                 # Network Policy Server
-            "Remote-Desktop-Services", # RDS (unless PSM)
-            "Hyper-V"               # Hypervisor
-        )
-
-        $installedRoles = Get-WindowsFeature | Where-Object { $_.Installed -eq $true }
-        $foundUnnecessary = @()
-
-        foreach ($role in $unnecessaryRoles) {
-            $installed = $installedRoles | Where-Object { $_.Name -eq $role }
-            if ($installed) {
-                # Allow Web-Server on PVWA, RDS on PSM
-                $isVault = Test-Path "C:\Program Files (x86)\CyberArk\Vault" -ErrorAction SilentlyContinue
-                $isPVWA = Test-Path "C:\inetpub\wwwroot\PasswordVault" -ErrorAction SilentlyContinue
-                $isPSM = Test-Path "C:\Program Files (x86)\CyberArk\PSM" -ErrorAction SilentlyContinue
-
-                if ($role -eq "Web-Server" -and $isPVWA) { continue }
-                if ($role -eq "Remote-Desktop-Services" -and $isPSM) { continue }
-                if ($isVault) {
-                    $foundUnnecessary += $role
-                }
-            }
-        }
-
-        if ($foundUnnecessary.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD1" `
-                -Finding "Unnecessary server roles installed" `
-                -Resource "Windows Server Roles" `
-                -CurrentValue "$($foundUnnecessary.Count) roles: $($foundUnnecessary -join ', ')" `
-                -ExpectedValue "Minimal roles for CyberArk function" `
-                -Recommendation "Remove unnecessary roles to reduce attack surface" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD1" `
-                -Finding "Server roles appropriately configured" `
-                -Resource "Windows Server Roles" `
-                -CurrentValue "No unnecessary roles detected" `
-                -ExpectedValue "Minimal roles" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" `
-            -CheckName "Unnecessary Server Roles" `
-            -Reason "Error checking server roles: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-ScreenSaverConfiguration {
-    Write-AuditLog "Checking screen saver configuration (HARD2)..." -Level Info
-
-    try {
-        # Check screen saver settings from registry
-        $ssActive = (Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveActive" -ErrorAction SilentlyContinue).ScreenSaveActive
-        $ssSecure = (Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaverIsSecure" -ErrorAction SilentlyContinue).ScreenSaverIsSecure
-        $ssTimeout = (Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveTimeOut" -ErrorAction SilentlyContinue).ScreenSaveTimeOut
-
-        $issues = @()
-
-        if ($ssActive -ne "1") {
-            $issues += "Screen saver not active"
-        }
-        if ($ssSecure -ne "1") {
-            $issues += "Screen saver not password protected"
-        }
-        if ($ssTimeout -and [int]$ssTimeout -gt 900) {
-            $issues += "Timeout too long ($ssTimeout seconds)"
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD2" `
-                -Finding "Screen saver not properly configured" `
-                -Resource "Screen Saver Settings" `
-                -CurrentValue $($issues -join "; ") `
-                -ExpectedValue "Active, password protected, <= 15 min timeout" `
-                -Recommendation "Enable password-protected screen saver with 15-minute or less timeout" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD2" `
-                -Finding "Screen saver properly configured" `
-                -Resource "Screen Saver Settings" `
-                -CurrentValue "Active with password protection" `
-                -ExpectedValue "Secure screen saver" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD2" `
-            -CheckName "Screen Saver Configuration" `
-            -Reason "Error checking screen saver: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-AdvancedAuditPolicyConfig {
-    Write-AuditLog "Checking advanced audit policy configuration (HARD3)..." -Level Info
-
-    try {
-        # Required audit subcategories for CyberArk servers
-        $requiredAudits = @(
-            "Credential Validation",
-            "Kerberos Authentication Service",
-            "Kerberos Service Ticket Operations",
-            "Computer Account Management",
-            "Security Group Management",
-            "User Account Management",
-            "Process Creation",
-            "Logon",
-            "Logoff",
-            "Account Lockout",
-            "Special Logon",
-            "Audit Policy Change",
-            "Sensitive Privilege Use",
-            "File System",
-            "Registry",
-            "Kernel Object"
-        )
-
-        $auditOutput = auditpol /get /category:* 2>$null
-        $missingAudits = @()
-
-        foreach ($audit in $requiredAudits) {
-            $found = $auditOutput | Where-Object { $_ -match $audit -and $_ -notmatch "No Auditing" }
-            if (-not $found) {
-                $missingAudits += $audit
-            }
-        }
-
-        if ($missingAudits.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD3" `
-                -Finding "Advanced audit policy incomplete" `
-                -Resource "Audit Policy" `
-                -CurrentValue "$($missingAudits.Count) missing: $($missingAudits[0..4] -join ', ')$(if($missingAudits.Count -gt 5){'...'})" `
-                -ExpectedValue "All required audit subcategories enabled" `
-                -Recommendation "Enable auditing for all required subcategories per CyberArk hardening guide" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD3" `
-                -Finding "Advanced audit policy properly configured" `
-                -Resource "Audit Policy" `
-                -CurrentValue "All required subcategories audited" `
-                -ExpectedValue "Comprehensive auditing" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD3" `
-            -CheckName "Advanced Audit Policy" `
-            -Reason "Error checking audit policy: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-RemoteDesktopHardening {
-    Write-AuditLog "Checking Remote Desktop hardening (HARD4)..." -Level Info
-
-    try {
-        $issues = @()
-
-        # Check NLA requirement
-        $nla = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -ErrorAction SilentlyContinue).UserAuthentication
-        if ($nla -ne 1) {
-            $issues += "NLA not required"
-        }
-
-        # Check encryption level
-        $encLevel = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MinEncryptionLevel" -ErrorAction SilentlyContinue).MinEncryptionLevel
-        if ($encLevel -lt $script:Config.MinRDPEncryptionLevel) {
-            $issues += "Encryption level too low ($encLevel)"
-        }
-
-        # Check security layer (2 = TLS)
-        $secLayer = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -ErrorAction SilentlyContinue).SecurityLayer
-        if ($secLayer -lt 2) {
-            $issues += "Not using TLS security layer"
-        }
-
-        # Check idle timeout
-        $idleTimeout = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "MaxIdleTime" -ErrorAction SilentlyContinue).MaxIdleTime
-        if (-not $idleTimeout -or $idleTimeout -eq 0) {
-            $issues += "No idle timeout configured"
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD4" `
-                -Finding "Remote Desktop not properly hardened" `
-                -Resource "RDP Configuration" `
-                -CurrentValue $($issues -join "; ") `
-                -ExpectedValue "NLA, TLS, high encryption, idle timeout" `
-                -Recommendation "Configure NLA, TLS 1.2+, high encryption, and idle timeout for RDP" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD4" `
-                -Finding "Remote Desktop properly hardened" `
-                -Resource "RDP Configuration" `
-                -CurrentValue "NLA, TLS, encryption configured" `
-                -ExpectedValue "Secure RDP" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD4" `
-            -CheckName "Remote Desktop Hardening" `
-            -Reason "Error checking RDP settings: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-RegistryPermissions {
-    Write-AuditLog "Checking registry permissions (HARD5)..." -Level Info
-
-    try {
-        # Critical registry paths to check
-        $criticalPaths = @(
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa",
-            "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders",
-            "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-        )
-
-        $issues = @()
-
-        foreach ($path in $criticalPaths) {
-            if (Test-Path $path -ErrorAction SilentlyContinue) {
-                try {
-                    $acl = Get-Acl $path -ErrorAction SilentlyContinue
-                    if (-not $acl) { continue }
-                    
-                    foreach ($ace in $acl.Access) {
-                        try {
-                            # Check for overly permissive access
-                            if ($ace.IdentityReference -match "Everyone|Users|Authenticated Users") {
-                                if ($ace.RegistryRights -match "FullControl|WriteKey|SetValue") {
-                                    $issues += "$path allows write by $($ace.IdentityReference)"
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD5" `
-                -Finding "Overly permissive registry permissions" `
-                -Resource "Registry ACLs" `
-                -CurrentValue "$($issues.Count) issues: $($issues[0..1] -join '; ')$(if($issues.Count -gt 2){'...'})" `
-                -ExpectedValue "Restrictive permissions on security registry keys" `
-                -Recommendation "Remove write permissions for non-admin users on security registry keys" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD5" `
-                -Finding "Registry permissions appropriately configured" `
-                -Resource "Registry ACLs" `
-                -CurrentValue "No overly permissive ACLs found" `
-                -ExpectedValue "Restrictive permissions" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD5" `
-            -CheckName "Registry Permissions" `
-            -Reason "Error checking registry permissions: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-RegistryAuditing {
-    Write-AuditLog "Checking registry auditing (HARD6)..." -Level Info
-
-    try {
-        # Check if auditing is enabled on critical registry keys
-        $criticalPaths = @(
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa",
-            "HKLM:\SECURITY"
-        )
-
-        $auditConfigured = $false
-
-        foreach ($path in $criticalPaths) {
-            if (Test-Path $path -ErrorAction SilentlyContinue) {
-                try {
-                    $acl = Get-Acl $path -Audit -ErrorAction SilentlyContinue
-                    if ($acl -and $acl.Audit.Count -gt 0) {
-                        $auditConfigured = $true
-                        break
-                    }
-                }
-                catch { }
-            }
-        }
-
-        if (-not $auditConfigured) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD6" `
-                -Finding "Registry auditing not configured" `
-                -Resource "Registry Audit ACLs" `
-                -CurrentValue "No audit rules on critical registry keys" `
-                -ExpectedValue "Audit rules on LSA and security keys" `
-                -Recommendation "Configure auditing on critical registry paths for security monitoring" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD6" `
-                -Finding "Registry auditing configured" `
-                -Resource "Registry Audit ACLs" `
-                -CurrentValue "Audit rules present" `
-                -ExpectedValue "Audit on critical keys" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD6" `
-            -CheckName "Registry Auditing" `
-            -Reason "Error checking registry auditing: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-FileSystemPermissions {
-    Write-AuditLog "Checking file system permissions (HARD7)..." -Level Info
-
-    try {
-        # Check if running as admin (required for some paths)
-        $isAdmin = $false
-        try {
-            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        }
-        catch {
-            # If we can't determine admin status, assume non-admin
-            Write-AuditLog "Could not determine admin status, assuming non-admin" -Level Warning
-        }
-        
-        # Critical paths per CYBRHardeningCheck - include paths accessible without admin
-        $criticalPaths = @(
-            @{ Path = "$env:SystemRoot\System32\Config"; RequiresAdmin = $true },
-            @{ Path = "$env:SystemRoot\System32\Config\RegBack"; RequiresAdmin = $true },
-            @{ Path = "$env:ProgramData"; RequiresAdmin = $false },
-            @{ Path = "$env:SystemRoot\Temp"; RequiresAdmin = $false }
-        )
-        
-        # Add CyberArk-specific paths if they exist
-        $cyberArkPaths = @(
-            "C:\Program Files (x86)\CyberArk",
-            "C:\CyberArk"
-        )
-        foreach ($caPath in $cyberArkPaths) {
-            if (Test-Path $caPath -ErrorAction SilentlyContinue) {
-                $criticalPaths += @{ Path = $caPath; RequiresAdmin = $false }
-            }
-        }
-
-        $issues = @()
-        $pathsChecked = 0
-        $pathsSkipped = 0
-
-        foreach ($pathInfo in $criticalPaths) {
-            $path = $pathInfo.Path
-            
-            # Skip admin-required paths if not running as admin
-            if ($pathInfo.RequiresAdmin -and -not $isAdmin) {
-                $pathsSkipped++
-                continue
-            }
-            
-            if (Test-Path $path -ErrorAction SilentlyContinue) {
-                try {
-                    $acl = Get-Acl $path -ErrorAction SilentlyContinue
-                    if (-not $acl) {
-                        $pathsSkipped++
-                        continue
-                    }
-                    $pathsChecked++
-                    
-                    foreach ($ace in $acl.Access) {
-                        try {
-                            if ($ace.IdentityReference -match "Everyone|Users|Authenticated Users") {
-                                $rights = $ace.FileSystemRights.ToString()
-                                if ($rights -match "FullControl|Modify|Write" -and $rights -notmatch "Synchronize") {
-                                    # Exclude inherited permissions on common directories
-                                    if (-not ($path -eq "$env:ProgramData" -and $ace.IsInherited)) {
-                                        $issues += "$path writable by $($ace.IdentityReference)"
-                                    }
-                                }
-                            }
-                        }
-                        catch {
-                            # Skip this ACE if we can't read it
-                        }
-                    }
-                }
-                catch [System.UnauthorizedAccessException] {
-                    # Access denied or missing privilege - need admin rights
-                    $pathsSkipped++
-                }
-                catch {
-                    # Other error (including "unauthorized operation") - continue with next path
-                    $pathsSkipped++
-                }
-            }
-        }
-        
-        # If we couldn't check any paths, report as skipped
-        if ($pathsChecked -eq 0) {
-            Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD7" `
-                -CheckName "File System Permissions" `
-                -Reason "Could not access any critical paths (run as Administrator for full check)" `
-                -Type "InsufficientPrivileges"
-            return
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD7" `
-                -Finding "Overly permissive file system permissions" `
-                -Resource "Critical File Paths" `
-                -CurrentValue "$($issues.Count) issues found" `
-                -ExpectedValue "Restrictive permissions on system config" `
-                -Recommendation "Remove write permissions for non-admin users on system config directories" `
-                -Severity "Critical"
-        }
-        else {
-            $note = if ($pathsSkipped -gt 0) { " ($pathsSkipped paths skipped - run as Admin for full check)" } else { "" }
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD7" `
-                -Finding "File system permissions appropriately configured" `
-                -Resource "Critical File Paths ($pathsChecked checked$note)" `
-                -CurrentValue "No overly permissive ACLs" `
-                -ExpectedValue "Restrictive permissions" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD7" `
-            -CheckName "File System Permissions" `
-            -Reason "Error checking file permissions: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-FileSystemAuditing {
-    Write-AuditLog "Checking file system auditing (HARD8)..." -Level Info
-
-    try {
-        $criticalPaths = @(
-            "$env:SystemRoot\System32\Config"
-        )
-
-        $auditConfigured = $false
-
-        foreach ($path in $criticalPaths) {
-            if (Test-Path $path) {
-                try {
-                    $acl = Get-Acl $path -Audit -ErrorAction SilentlyContinue
-                    if ($acl.Audit.Count -gt 0) {
-                        $auditConfigured = $true
-                        break
-                    }
-                }
-                catch { }
-            }
-        }
-
-        if (-not $auditConfigured) {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD8" `
-                -Finding "File system auditing not configured" `
-                -Resource "File System Audit" `
-                -CurrentValue "No audit rules on critical directories" `
-                -ExpectedValue "Audit rules on system config directories" `
-                -Recommendation "Configure auditing on critical system directories" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "Server Hardening" `
-                -CISControl "HARD8" `
-                -Finding "File system auditing configured" `
-                -Resource "File System Audit" `
-                -CurrentValue "Audit rules present" `
-                -ExpectedValue "Audit on critical paths" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD8" `
-            -CheckName "File System Auditing" `
-            -Reason "Error checking file auditing: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-#======================================================================
-# VAULT HARDENING CHECKS (VAULT1-VAULT6)
-#======================================================================
-
-function Test-VaultHardening {
-    Write-AuditLog "Running Vault-Specific Hardening Checks..." -Level Info
-
-    # Only run if this is a Vault server
-    $isVault = Test-Path "C:\Program Files (x86)\CyberArk\Vault" -ErrorAction SilentlyContinue
-    if (-not $isVault) {
-        $isVault = Test-Path "C:\Program Files\CyberArk\Vault" -ErrorAction SilentlyContinue
-    }
-
-    if (-not $isVault) {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT1" `
-            -CheckName "Vault Hardening Checks" `
-            -Reason "Not a Vault server - checks not applicable" `
-            -Type "NotApplicable"
-        return
-    }
-
-    Test-VaultNICHardening
-    Test-VaultStaticIP
-    Test-VaultDomainMembership
-    Test-VaultLogicContainerService
-    Test-VaultFirewallRules
-    Test-VaultServerCertificate
-}
-
-function Test-VaultNICHardening {
-    Write-AuditLog "Checking Vault NIC hardening (VAULT1)..." -Level Info
-
-    try {
-        $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
-        $issues = @()
-
-        # Vault should have minimal NICs
-        if ($adapters.Count -gt 2) {
-            $issues += "Multiple active NICs ($($adapters.Count))"
-        }
-
-        foreach ($adapter in $adapters) {
-            $bindings = Get-NetAdapterBinding -Name $adapter.Name | Where-Object { $_.Enabled -eq $true }
-            
-            # Check for unnecessary protocols
-            $unnecessaryProtocols = @("ms_tcpip6", "ms_lltdio", "ms_lldp", "ms_rspndr")
-            foreach ($proto in $unnecessaryProtocols) {
-                $binding = $bindings | Where-Object { $_.ComponentID -eq $proto }
-                if ($binding) {
-                    $issues += "$($adapter.Name): $proto enabled"
-                }
-            }
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT1" `
-                -Finding "Vault NIC not properly hardened" `
-                -Resource "Network Adapters" `
-                -CurrentValue "$($issues.Count) issues: $($issues[0..2] -join '; ')$(if($issues.Count -gt 3){'...'})" `
-                -ExpectedValue "Single NIC with minimal protocols" `
-                -Recommendation "Disable unnecessary protocols and NICs on Vault server" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT1" `
-                -Finding "Vault NIC properly hardened" `
-                -Resource "Network Adapters" `
-                -CurrentValue "Minimal configuration" `
-                -ExpectedValue "Hardened NIC" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT1" `
-            -CheckName "Vault NIC Hardening" `
-            -Reason "Error checking NIC: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-VaultStaticIP {
-    Write-AuditLog "Checking Vault static IP configuration (VAULT2)..." -Level Info
-
-    try {
-        $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
-        $usingDHCP = $false
-
-        foreach ($adapter in $adapters) {
-            $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex -ErrorAction SilentlyContinue
-            if ($ipConfig.NetIPv4Interface.Dhcp -eq "Enabled") {
-                $usingDHCP = $true
-            }
-        }
-
-        if ($usingDHCP) {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT2" `
-                -Finding "Vault using DHCP" `
-                -Resource "IP Configuration" `
-                -CurrentValue "DHCP enabled" `
-                -ExpectedValue "Static IP address" `
-                -Recommendation "Configure static IP address for Vault server" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT2" `
-                -Finding "Vault using static IP" `
-                -Resource "IP Configuration" `
-                -CurrentValue "Static IP configured" `
-                -ExpectedValue "Static IP" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT2" `
-            -CheckName "Vault Static IP" `
-            -Reason "Error checking IP config: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-VaultDomainMembership {
-    Write-AuditLog "Checking Vault domain membership (VAULT3)..." -Level Info
-
-    try {
-        $computerSystem = Get-WmiObject -Class Win32_ComputerSystem
-        $isDomainJoined = $computerSystem.PartOfDomain
-
-        if ($isDomainJoined -and $script:Config.RequireNonDomainJoined) {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT3" `
-                -Finding "Vault server is domain-joined" `
-                -Resource "Domain Membership" `
-                -CurrentValue "Domain: $($computerSystem.Domain)" `
-                -ExpectedValue "Workgroup (not domain-joined)" `
-                -Recommendation "Vault should be standalone workgroup member for security isolation" `
-                -Severity "Critical"
-        }
-        else {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT3" `
-                -Finding "Vault server not domain-joined" `
-                -Resource "Domain Membership" `
-                -CurrentValue "Workgroup: $($computerSystem.Workgroup)" `
-                -ExpectedValue "Not domain-joined" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT3" `
-            -CheckName "Vault Domain Membership" `
-            -Reason "Error checking domain membership: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-VaultLogicContainerService {
-    Write-AuditLog "Checking Vault Logic Container service (VAULT4)..." -Level Info
-
-    try {
-        $service = Get-WmiObject -Class Win32_Service -Filter "Name='PrivateArk Server'" -ErrorAction SilentlyContinue
-
-        if ($service) {
-            $serviceAccount = $service.StartName
-
-            if ($serviceAccount -eq "LocalSystem") {
-                Add-Finding -Category "Vault Hardening" `
-                    -CISControl "VAULT4" `
-                    -Finding "Vault service running as LocalSystem" `
-                    -Resource "PrivateArk Server Service" `
-                    -CurrentValue $serviceAccount `
-                    -ExpectedValue "Dedicated local service account" `
-                    -Recommendation "Consider using dedicated local service account instead of LocalSystem" `
-                    -Severity "Medium"
-            }
-            else {
-                Add-Finding -Category "Vault Hardening" `
-                    -CISControl "VAULT4" `
-                    -Finding "Vault service using dedicated account" `
-                    -Resource "PrivateArk Server Service" `
-                    -CurrentValue $serviceAccount `
-                    -ExpectedValue "Non-LocalSystem account" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT4" `
-            -CheckName "Vault Logic Container Service" `
-            -Reason "Error checking service: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-VaultFirewallRules {
-    Write-AuditLog "Checking Vault firewall rules (VAULT5)..." -Level Info
-
-    try {
-        # Expected Vault ports
-        $expectedPorts = @(1858, 1859)
-        
-        $inboundRules = Get-NetFirewallRule -Enabled True -Direction Inbound -ErrorAction SilentlyContinue
-        $nonStandardRules = @()
-
-        foreach ($rule in $inboundRules) {
-            $portFilter = $rule | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue
-            if ($portFilter.LocalPort -ne "Any" -and $portFilter.LocalPort) {
-                $ports = $portFilter.LocalPort -split ","
-                foreach ($port in $ports) {
-                    if ($port -match "^\d+$") {
-                        $portNum = [int]$port
-                        if ($portNum -notin $expectedPorts -and $portNum -notin @(3389, 5985, 5986)) {
-                            $nonStandardRules += "$($rule.DisplayName) (Port: $port)"
-                        }
-                    }
-                }
-            }
-        }
-
-        if ($nonStandardRules.Count -gt 5) {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT5" `
-                -Finding "Non-standard firewall rules on Vault" `
-                -Resource "Windows Firewall" `
-                -CurrentValue "$($nonStandardRules.Count) non-standard rules" `
-                -ExpectedValue "Only Vault ports (1858, 1859) and management" `
-                -Recommendation "Review and remove unnecessary firewall rules from Vault" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT5" `
-                -Finding "Vault firewall rules appropriate" `
-                -Resource "Windows Firewall" `
-                -CurrentValue "Standard rules only" `
-                -ExpectedValue "Minimal rules" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT5" `
-            -CheckName "Vault Firewall Rules" `
-            -Reason "Error checking firewall: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-VaultServerCertificate {
-    Write-AuditLog "Checking Vault server certificate (VAULT6)..." -Level Info
-
-    try {
-        # Check for Vault certificate in certificate store
-        $vaultCerts = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object {
-            $_.Subject -match "Vault|CyberArk|PrivateArk"
-        }
-
-        if ($vaultCerts.Count -eq 0) {
-            Add-Finding -Category "Vault Hardening" `
-                -CISControl "VAULT6" `
-                -Finding "No Vault certificate found (manual verification)" `
-                -Resource "Vault Certificate" `
-                -CurrentValue "Certificate verification required" `
-                -ExpectedValue "Valid Vault server certificate" `
-                -Recommendation "Verify Vault server certificate is properly configured" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-        else {
-            foreach ($cert in $vaultCerts) {
-                $daysToExpiry = ($cert.NotAfter - (Get-Date)).Days
-
-                if ($daysToExpiry -lt 0) {
-                    Add-Finding -Category "Vault Hardening" `
-                        -CISControl "VAULT6" `
-                        -Finding "Vault certificate expired" `
-                        -Resource $cert.Subject `
-                        -CurrentValue "Expired $([Math]::Abs($daysToExpiry)) days ago" `
-                        -ExpectedValue "Valid certificate" `
-                        -Recommendation "Renew Vault server certificate immediately" `
-                        -Severity "Critical"
-                }
-                elseif ($daysToExpiry -lt 30) {
-                    Add-Finding -Category "Vault Hardening" `
-                        -CISControl "VAULT6" `
-                        -Finding "Vault certificate expiring soon" `
-                        -Resource $cert.Subject `
-                        -CurrentValue "Expires in $daysToExpiry days" `
-                        -ExpectedValue "Certificate valid > 30 days" `
-                        -Recommendation "Plan Vault certificate renewal" `
-                        -Severity "High"
-                }
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT6" `
-            -CheckName "Vault Server Certificate" `
-            -Reason "Error checking certificate: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-#======================================================================
-# PSM HARDENING CHECKS (PSMH1-PSMH10)
-#======================================================================
-
-function Test-PSMHardening {
-    Write-AuditLog "Running PSM-Specific Hardening Checks..." -Level Info
-
-    # Only run if this is a PSM server
-    $isPSM = Test-Path "C:\Program Files (x86)\CyberArk\PSM" -ErrorAction SilentlyContinue
-    if (-not $isPSM) {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH1" `
-            -CheckName "PSM Hardening Checks" `
-            -Reason "Not a PSM server - checks not applicable" `
-            -Type "NotApplicable"
-        return
-    }
-
-    Test-PSMUserConfiguration
-    Test-PSMRemoteDesktopUsers
-    Test-PSMAppLockerRules
-    Test-PSMDrivesHidden
-    Test-PSMIEToolsBlocked
-    Test-PSMRDSHardening
-    Test-PSMUserAccessHardening
-    Test-PSMSMBHardening
-}
-
-function Test-PSMUserConfiguration {
-    Write-AuditLog "Checking PSM user configuration (PSMH1)..." -Level Info
-
-    try {
-        # Check for PSM shadow users
-        $localUsers = Get-LocalUser | Where-Object { $_.Name -match "PSM" }
-        
-        if ($localUsers.Count -eq 0) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH1" `
-                -Finding "PSM local users configuration (manual verification)" `
-                -Resource "PSM Users" `
-                -CurrentValue "No PSM-prefixed local users found" `
-                -ExpectedValue "PSM shadow users configured" `
-                -Recommendation "Verify PSM shadow users are properly configured" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-        else {
-            foreach ($user in $localUsers) {
-                if ($user.Enabled -and -not $user.PasswordExpires) {
-                    Add-Finding -Category "PSM Hardening" `
-                        -CISControl "PSMH1" `
-                        -Finding "PSM user password never expires" `
-                        -Resource $user.Name `
-                        -CurrentValue "Password never expires" `
-                        -ExpectedValue "Password rotation enabled" `
-                        -Recommendation "Enable password expiration for PSM users" `
-                        -Severity "Medium"
-                }
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH1" `
-            -CheckName "PSM User Configuration" `
-            -Reason "Error checking PSM users: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMRemoteDesktopUsers {
-    Write-AuditLog "Checking Remote Desktop Users group (PSMH2)..." -Level Info
-
-    try {
-        $rdpGroup = Get-LocalGroupMember -Group "Remote Desktop Users" -ErrorAction SilentlyContinue
-        
-        if ($rdpGroup.Count -gt 0) {
-            $members = $rdpGroup | ForEach-Object { $_.Name }
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH2" `
-                -Finding "Remote Desktop Users group not empty" `
-                -Resource "Remote Desktop Users" `
-                -CurrentValue "$($rdpGroup.Count) members: $($members[0..2] -join ', ')$(if($members.Count -gt 3){'...'})" `
-                -ExpectedValue "Empty (PSM handles RDP access)" `
-                -Recommendation "Remove users from Remote Desktop Users group; PSM manages access" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH2" `
-                -Finding "Remote Desktop Users group empty" `
-                -Resource "Remote Desktop Users" `
-                -CurrentValue "No members" `
-                -ExpectedValue "Empty group" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH2" `
-            -CheckName "Remote Desktop Users" `
-            -Reason "Error checking group: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMAppLockerRules {
-    Write-AuditLog "Checking AppLocker rules (PSMH3)..." -Level Info
-
-    try {
-        # Check if AppLocker service is running
-        $applockerSvc = Get-Service -Name "AppIDSvc" -ErrorAction SilentlyContinue
-        
-        if (-not $applockerSvc -or $applockerSvc.Status -ne "Running") {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH3" `
-                -Finding "AppLocker service not running" `
-                -Resource "Application Identity Service" `
-                -CurrentValue $(if ($applockerSvc) { $applockerSvc.Status } else { "Not found" }) `
-                -ExpectedValue "Running" `
-                -Recommendation "Enable and start Application Identity service for AppLocker" `
-                -Severity "Critical"
-            return
-        }
-
-        # Check for AppLocker policies
-        $applockerPolicy = Get-AppLockerPolicy -Effective -ErrorAction SilentlyContinue
-        
-        if (-not $applockerPolicy -or $applockerPolicy.RuleCollections.Count -eq 0) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH3" `
-                -Finding "No AppLocker policies configured" `
-                -Resource "AppLocker" `
-                -CurrentValue "No effective policies" `
-                -ExpectedValue "PSM AppLocker policies applied" `
-                -Recommendation "Configure and apply CyberArk PSM AppLocker policies" `
-                -Severity "Critical"
-        }
-        else {
-            $ruleCount = ($applockerPolicy.RuleCollections | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH3" `
-                -Finding "AppLocker policies configured" `
-                -Resource "AppLocker" `
-                -CurrentValue "$ruleCount rules across $($applockerPolicy.RuleCollections.Count) collections" `
-                -ExpectedValue "PSM policies applied" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH3" `
-            -CheckName "AppLocker Rules" `
-            -Reason "Error checking AppLocker: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMDrivesHidden {
-    Write-AuditLog "Checking PSM drives hidden (PSMH4)..." -Level Info
-
-    try {
-        # Check NoDrives policy
-        $noDrives = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name "NoDrives" -ErrorAction SilentlyContinue).NoDrives
-
-        if (-not $noDrives -or $noDrives -eq 0) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH4" `
-                -Finding "Local drives not hidden from PSM sessions" `
-                -Resource "Explorer Policy" `
-                -CurrentValue "NoDrives not configured" `
-                -ExpectedValue "Drives hidden from PSM sessions" `
-                -Recommendation "Configure NoDrives policy to hide local drives in PSM sessions" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH4" `
-                -Finding "Local drives hidden configuration" `
-                -Resource "Explorer Policy" `
-                -CurrentValue "NoDrives = $noDrives" `
-                -ExpectedValue "Drives hidden" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH4" `
-            -CheckName "PSM Drives Hidden" `
-            -Reason "Error checking drive policy: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMIEToolsBlocked {
-    Write-AuditLog "Checking IE developer tools blocked (PSMH5)..." -Level Info
-
-    try {
-        # Check if IE developer tools are blocked
-        $devToolsDisabled = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\IEDevTools" -Name "Disabled" -ErrorAction SilentlyContinue).Disabled
-
-        if ($devToolsDisabled -ne 1) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH5" `
-                -Finding "IE Developer Tools not blocked" `
-                -Resource "Internet Explorer Policy" `
-                -CurrentValue "Developer Tools enabled" `
-                -ExpectedValue "Developer Tools disabled" `
-                -Recommendation "Disable IE Developer Tools via Group Policy for PSM sessions" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH5" `
-                -Finding "IE Developer Tools blocked" `
-                -Resource "Internet Explorer Policy" `
-                -CurrentValue "Disabled" `
-                -ExpectedValue "Disabled" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH5" `
-            -CheckName "IE Tools Blocked" `
-            -Reason "Error checking IE policy: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMRDSHardening {
-    Write-AuditLog "Checking RDS hardening for PSM (PSMH6)..." -Level Info
-
-    try {
-        $issues = @()
-
-        # Check clipboard redirection
-        $clipboard = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fDisableClip" -ErrorAction SilentlyContinue).fDisableClip
-        if ($clipboard -ne 1) {
-            $issues += "Clipboard redirection enabled"
-        }
-
-        # Check drive redirection
-        $drives = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fDisableCdm" -ErrorAction SilentlyContinue).fDisableCdm
-        if ($drives -ne 1) {
-            $issues += "Drive redirection enabled"
-        }
-
-        # Check printer redirection
-        $printers = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fDisableCpm" -ErrorAction SilentlyContinue).fDisableCpm
-        if ($printers -ne 1) {
-            $issues += "Printer redirection enabled"
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH6" `
-                -Finding "RDS not properly hardened for PSM" `
-                -Resource "Terminal Services" `
-                -CurrentValue $($issues -join "; ") `
-                -ExpectedValue "All redirections disabled" `
-                -Recommendation "Disable clipboard, drive, and printer redirection for PSM" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH6" `
-                -Finding "RDS properly hardened" `
-                -Resource "Terminal Services" `
-                -CurrentValue "Redirections disabled" `
-                -ExpectedValue "Hardened RDS" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH6" `
-            -CheckName "RDS Hardening" `
-            -Reason "Error checking RDS: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMUserAccessHardening {
-    Write-AuditLog "Checking PSM user access hardening (PSMH7)..." -Level Info
-
-    try {
-        # Check for restricted groups policy
-        Add-Finding -Category "PSM Hardening" `
-            -CISControl "PSMH7" `
-            -Finding "PSM user access hardening (manual verification)" `
-            -Resource "User Access" `
-            -CurrentValue "Manual verification required" `
-            -ExpectedValue "PSM users restricted to required access only" `
-            -Recommendation "Verify PSM users have minimal required permissions" `
-            -Severity "Info" `
-            -Status "Pass"
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH7" `
-            -CheckName "PSM User Access" `
-            -Reason "Error checking access: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PSMSMBHardening {
-    Write-AuditLog "Checking SMB hardening for PSM (PSMH8)..." -Level Info
-
-    try {
-        $issues = @()
-
-        # Check SMBv1
-        $smb1 = Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -ErrorAction SilentlyContinue
-        if ($smb1 -and $smb1.State -eq "Enabled") {
-            $issues += "SMBv1 enabled"
-        }
-
-        # Check SMB signing
-        $smbSigning = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "RequireSecuritySignature" -ErrorAction SilentlyContinue).RequireSecuritySignature
-        if ($smbSigning -ne 1) {
-            $issues += "SMB signing not required"
-        }
-
-        if ($issues.Count -gt 0) {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH8" `
-                -Finding "SMB not properly hardened" `
-                -Resource "SMB Configuration" `
-                -CurrentValue $($issues -join "; ") `
-                -ExpectedValue "SMBv1 disabled, signing required" `
-                -Recommendation "Disable SMBv1 and require SMB signing" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PSM Hardening" `
-                -CISControl "PSMH8" `
-                -Finding "SMB properly hardened" `
-                -Resource "SMB Configuration" `
-                -CurrentValue "SMBv1 disabled, signing enabled" `
-                -ExpectedValue "Hardened SMB" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH8" `
-            -CheckName "SMB Hardening" `
-            -Reason "Error checking SMB: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-#======================================================================
-# PVWA IIS HARDENING CHECKS (PVWAH1-PVWAH8)
-#======================================================================
-
-function Test-PVWAHardening {
-    Write-AuditLog "Running PVWA-Specific Hardening Checks..." -Level Info
-
-    # Only run if this is a PVWA server
-    $isPVWA = Test-Path "C:\inetpub\wwwroot\PasswordVault" -ErrorAction SilentlyContinue
-    if (-not $isPVWA) {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH1" `
-            -CheckName "PVWA Hardening Checks" `
-            -Reason "Not a PVWA server - checks not applicable" `
-            -Type "NotApplicable"
-        return
-    }
-
-    Test-PVWAWebDAV
-    Test-PVWAAnonymousAuth
-    Test-PVWAAppPoolConfig
-    Test-PVWAMimeTypes
-    Test-PVWACryptography
-    Test-PVWAInstallLocation
-}
-
-function Test-PVWAWebDAV {
-    Write-AuditLog "Checking WebDAV disabled (PVWAH2)..." -Level Info
-
-    try {
-        $webdavInstalled = $false
-        
-        # Detect if running on Windows Server or Windows Client
-        $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-        $isServer = $osInfo.ProductType -ne 1  # 1 = Workstation, 2 = DC, 3 = Server
-        
-        if ($isServer -and (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue)) {
-            # Windows Server - use Get-WindowsFeature
-            $webdav = Get-WindowsFeature -Name Web-DAV-Publishing -ErrorAction SilentlyContinue
-            $webdavInstalled = $webdav -and $webdav.Installed
-        }
-        else {
-            # Windows Client - use Get-WindowsOptionalFeature
-            $webdav = Get-WindowsOptionalFeature -Online -FeatureName "IIS-WebDAV" -ErrorAction SilentlyContinue
-            $webdavInstalled = $webdav -and $webdav.State -eq "Enabled"
-        }
-        
-        if ($webdavInstalled) {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH2" `
-                -Finding "WebDAV is installed" `
-                -Resource "IIS WebDAV" `
-                -CurrentValue "WebDAV Publishing installed" `
-                -ExpectedValue "WebDAV not installed" `
-                -Recommendation "Remove WebDAV Publishing feature from PVWA server" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH2" `
-                -Finding "WebDAV not installed" `
-                -Resource "IIS WebDAV" `
-                -CurrentValue "Not installed" `
-                -ExpectedValue "Not installed" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH2" `
-            -CheckName "WebDAV Check" `
-            -Reason "Error checking WebDAV: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PVWAAnonymousAuth {
-    Write-AuditLog "Checking anonymous authentication (PVWAH5)..." -Level Info
-
-    try {
-        Import-Module WebAdministration -ErrorAction SilentlyContinue
-        
-        $anonAuth = Get-WebConfigurationProperty -Filter "/system.webServer/security/authentication/anonymousAuthentication" -Name "enabled" -PSPath "IIS:\Sites\Default Web Site\PasswordVault" -ErrorAction SilentlyContinue
-
-        if ($anonAuth -eq $true) {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH5" `
-                -Finding "Anonymous authentication enabled on PVWA" `
-                -Resource "IIS Authentication" `
-                -CurrentValue "Anonymous auth enabled" `
-                -ExpectedValue "Anonymous auth disabled" `
-                -Recommendation "Disable anonymous authentication for PVWA application" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH5" `
-                -Finding "Anonymous authentication disabled" `
-                -Resource "IIS Authentication" `
-                -CurrentValue "Disabled" `
-                -ExpectedValue "Disabled" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH5" `
-            -CheckName "Anonymous Authentication" `
-            -Reason "Error checking auth: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PVWAAppPoolConfig {
-    Write-AuditLog "Checking PVWA App Pool configuration (PVWAH6)..." -Level Info
-
-    try {
-        Import-Module WebAdministration -ErrorAction SilentlyContinue
-        
-        $appPool = Get-Item "IIS:\AppPools\PasswordVaultWebAccessPool" -ErrorAction SilentlyContinue
-        
-        if ($appPool) {
-            $identity = $appPool.processModel.identityType
-            
-            if ($identity -eq "LocalSystem") {
-                Add-Finding -Category "PVWA Hardening" `
-                    -CISControl "PVWAH6" `
-                    -Finding "App Pool running as LocalSystem" `
-                    -Resource "PasswordVaultWebAccessPool" `
-                    -CurrentValue $identity `
-                    -ExpectedValue "ApplicationPoolIdentity or dedicated account" `
-                    -Recommendation "Configure App Pool to use ApplicationPoolIdentity or dedicated service account" `
-                    -Severity "High"
-            }
-            else {
-                Add-Finding -Category "PVWA Hardening" `
-                    -CISControl "PVWAH6" `
-                    -Finding "App Pool identity configured" `
-                    -Resource "PasswordVaultWebAccessPool" `
-                    -CurrentValue $identity `
-                    -ExpectedValue "Non-LocalSystem" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH6" `
-            -CheckName "App Pool Configuration" `
-            -Reason "Error checking App Pool: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PVWAMimeTypes {
-    Write-AuditLog "Checking PVWA MIME types (PVWAH4)..." -Level Info
-
-    try {
-        # Dangerous MIME types that should not be served
-        $dangerousMimesDescription = ".exe, .dll, .bat, .cmd, .ps1, .vbs, .msi"
-        
-        Add-Finding -Category "PVWA Hardening" `
-            -CISControl "PVWAH4" `
-            -Finding "MIME type configuration (manual verification)" `
-            -Resource "IIS MIME Types" `
-            -CurrentValue "Manual verification required" `
-            -ExpectedValue "Dangerous MIME types ($dangerousMimesDescription) removed" `
-            -Recommendation "Verify dangerous executable MIME types are not configured in IIS" `
-            -Severity "Info" `
-            -Status "Pass"
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH4" `
-            -CheckName "MIME Types" `
-            -Reason "Error checking MIME types: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PVWACryptography {
-    Write-AuditLog "Checking PVWA cryptography settings (PVWAH3)..." -Level Info
-
-    try {
-        # Check FIPS mode
-        $fipsEnabled = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy" -Name "Enabled" -ErrorAction SilentlyContinue).Enabled
-
-        if ($fipsEnabled -eq 1) {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH3" `
-                -Finding "FIPS mode enabled" `
-                -Resource "Cryptography Settings" `
-                -CurrentValue "FIPS enabled" `
-                -ExpectedValue "FIPS mode per requirements" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-        else {
-            Add-Finding -Category "PVWA Hardening" `
-                -CISControl "PVWAH3" `
-                -Finding "FIPS mode not enabled" `
-                -Resource "Cryptography Settings" `
-                -CurrentValue "FIPS disabled" `
-                -ExpectedValue "FIPS enabled if required by policy" `
-                -Recommendation "Enable FIPS mode if required by organizational policy" `
-                -Severity "Low"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH3" `
-            -CheckName "Cryptography Settings" `
-            -Reason "Error checking cryptography: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-PVWAInstallLocation {
-    Write-AuditLog "Checking PVWA install location (PVWAH7)..." -Level Info
-
-    try {
-        $pvwaPath = "C:\inetpub\wwwroot\PasswordVault"
-        
-        if (Test-Path $pvwaPath) {
-            if ($pvwaPath.StartsWith("C:\")) {
-                Add-Finding -Category "PVWA Hardening" `
-                    -CISControl "PVWAH7" `
-                    -Finding "PVWA installed on system drive" `
-                    -Resource "PVWA Installation" `
-                    -CurrentValue "Installed on C:\" `
-                    -ExpectedValue "Non-system drive recommended" `
-                    -Recommendation "Consider installing PVWA on non-system drive for security isolation" `
-                    -Severity "Low"
-            }
-            else {
-                Add-Finding -Category "PVWA Hardening" `
-                    -CISControl "PVWAH7" `
-                    -Finding "PVWA on non-system drive" `
-                    -Resource "PVWA Installation" `
-                    -CurrentValue $pvwaPath `
-                    -ExpectedValue "Non-system drive" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH7" `
-            -CheckName "Install Location" `
-            -Reason "Error checking location: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-#======================================================================
-# CPM HARDENING CHECKS (CPMH1-CPMH4)
-#======================================================================
-
-function Test-CPMHardening {
-    Write-AuditLog "Running CPM-Specific Hardening Checks..." -Level Info
-
-    # Only run if this is a CPM server
-    $isCPM = (Get-Service -Name "CyberArk Password Manager" -ErrorAction SilentlyContinue) -or
-             (Test-Path "C:\Program Files (x86)\CyberArk\Password Manager" -ErrorAction SilentlyContinue)
-    
-    if (-not $isCPM) {
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH1" `
-            -CheckName "CPM Hardening Checks" `
-            -Reason "Not a CPM server - checks not applicable" `
-            -Type "NotApplicable"
-        return
-    }
-
-    Test-CPMFIPSCryptography
-    Test-CPMDEPConfiguration
-    Test-CPMCredentialFiles
-    Test-CPMServiceAccount
-}
-
-function Test-CPMFIPSCryptography {
-    Write-AuditLog "Checking CPM FIPS cryptography (CPMH1)..." -Level Info
-
-    try {
-        $fipsEnabled = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy" -Name "Enabled" -ErrorAction SilentlyContinue).Enabled
-
-        if ($script:Config.RequireFIPS -and $fipsEnabled -ne 1) {
-            Add-Finding -Category "CPM Hardening" `
-                -CISControl "CPMH1" `
-                -Finding "FIPS cryptography not enabled" `
-                -Resource "CPM Cryptography" `
-                -CurrentValue "FIPS disabled" `
-                -ExpectedValue "FIPS enabled" `
-                -Recommendation "Enable FIPS cryptography mode for CPM" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "CPM Hardening" `
-                -CISControl "CPMH1" `
-                -Finding "FIPS cryptography configuration" `
-                -Resource "CPM Cryptography" `
-                -CurrentValue $(if ($fipsEnabled -eq 1) { "Enabled" } else { "Disabled" }) `
-                -ExpectedValue "Per organizational policy" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH1" `
-            -CheckName "FIPS Cryptography" `
-            -Reason "Error checking FIPS: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-CPMDEPConfiguration {
-    Write-AuditLog "Checking CPM DEP configuration (CPMH2)..." -Level Info
-
-    try {
-        $bcdedit = bcdedit /enum 2>$null | Out-String
-        $depEnabled = $bcdedit -match "nx\s+OptIn|nx\s+OptOut|nx\s+AlwaysOn"
-
-        if (-not $depEnabled) {
-            Add-Finding -Category "CPM Hardening" `
-                -CISControl "CPMH2" `
-                -Finding "DEP may not be properly configured" `
-                -Resource "Data Execution Prevention" `
-                -CurrentValue "DEP status unclear" `
-                -ExpectedValue "DEP enabled (OptIn or OptOut)" `
-                -Recommendation "Verify DEP is enabled for CPM security" `
-                -Severity "Medium"
-        }
-        else {
-            Add-Finding -Category "CPM Hardening" `
-                -CISControl "CPMH2" `
-                -Finding "DEP is configured" `
-                -Resource "Data Execution Prevention" `
-                -CurrentValue "DEP enabled" `
-                -ExpectedValue "DEP enabled" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH2" `
-            -CheckName "DEP Configuration" `
-            -Reason "Error checking DEP: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-CPMCredentialFiles {
-    Write-AuditLog "Checking CPM credential file hardening (CPMH3)..." -Level Info
-
-    try {
-        $cpmPath = "C:\Program Files (x86)\CyberArk\Password Manager"
-        $credFiles = Get-ChildItem -Path $cpmPath -Filter "*.cred" -Recurse -ErrorAction SilentlyContinue
-
-        if ($credFiles.Count -gt 0) {
-            $issues = @()
-            foreach ($file in $credFiles) {
-                $acl = Get-Acl $file.FullName -ErrorAction SilentlyContinue
-                foreach ($ace in $acl.Access) {
-                    if ($ace.IdentityReference -match "Everyone|Users") {
-                        if ($ace.FileSystemRights -match "Read|FullControl") {
-                            $issues += "$($file.Name) readable by $($ace.IdentityReference)"
-                        }
-                    }
-                }
-            }
-
-            if ($issues.Count -gt 0) {
-                Add-Finding -Category "CPM Hardening" `
-                    -CISControl "CPMH3" `
-                    -Finding "CPM credential files have weak permissions" `
-                    -Resource "Credential Files" `
-                    -CurrentValue "$($issues.Count) issues found" `
-                    -ExpectedValue "Restrictive permissions" `
-                    -Recommendation "Restrict access to CPM credential files" `
-                    -Severity "Critical"
-            }
-            else {
-                Add-Finding -Category "CPM Hardening" `
-                    -CISControl "CPMH3" `
-                    -Finding "CPM credential files properly secured" `
-                    -Resource "Credential Files" `
-                    -CurrentValue "Restrictive permissions" `
-                    -ExpectedValue "Secured" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH3" `
-            -CheckName "Credential Files" `
-            -Reason "Error checking credential files: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-CPMServiceAccount {
-    Write-AuditLog "Checking CPM service account (CPMH4)..." -Level Info
-
-    try {
-        $cpmServices = @(
-            "CyberArk Password Manager",
-            "CyberArk Central Policy Manager Scanner"
-        )
-
-        foreach ($svcName in $cpmServices) {
-            $service = Get-WmiObject -Class Win32_Service -Filter "Name='$svcName'" -ErrorAction SilentlyContinue
-            
-            if ($service) {
-                $serviceAccount = $service.StartName
-                
-                if ($serviceAccount -eq "LocalSystem") {
-                    Add-Finding -Category "CPM Hardening" `
-                        -CISControl "CPMH4" `
-                        -Finding "CPM service running as LocalSystem" `
-                        -Resource $svcName `
-                        -CurrentValue $serviceAccount `
-                        -ExpectedValue "Dedicated local service account" `
-                        -Recommendation "Configure CPM service to use dedicated local account" `
-                        -Severity "Medium"
-                }
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH4" `
-            -CheckName "CPM Service Account" `
-            -Reason "Error checking service: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-#======================================================================
-# APPLICATION CONTROL CHECKS (APPCTL1-APPCTL5) - Evasor-inspired
-#======================================================================
-
-function Test-ApplicationControl {
-    Write-AuditLog "Running Application Control Checks (Evasor-inspired)..." -Level Info
-
-    Test-DLLInjectionVulnerability
-    Test-DLLHijackingRisk
-    Test-ResourceHijacking
-    Test-AppLockerBypassPaths
-    Test-WritableSystemPaths
-}
-
-function Test-DLLInjectionVulnerability {
-    Write-AuditLog "Checking for DLL injection vulnerabilities (APPCTL1)..." -Level Info
-
-    try {
-        # Check if mavinject.exe exists (Microsoft tool that can inject DLLs)
-        $mavinject = "$env:SystemRoot\System32\mavinject.exe"
-        
-        if (Test-Path $mavinject) {
-            # Get running processes that could be vulnerable
-            $vulnerableProcesses = @()
-            $processes = Get-Process | Where-Object { 
-                $_.Path -and 
-                $_.SessionId -ne 0 -and 
-                $_.ProcessName -notmatch "System|Idle|csrss|smss|wininit|services|lsass"
-            }
-
-            # Check for processes running with lower integrity that could be targeted
-            foreach ($proc in $processes) {
-                try {
-                    $procPath = $proc.Path
-                    if ($procPath -match "CyberArk|PasswordVault") {
-                        $vulnerableProcesses += $proc.ProcessName
-                    }
-                }
-                catch { }
-            }
-
-            if ($vulnerableProcesses.Count -gt 0) {
-                Add-Finding -Category "Application Control" `
-                    -CISControl "APPCTL1" `
-                    -Finding "CyberArk processes may be vulnerable to DLL injection" `
-                    -Resource "Running Processes" `
-                    -CurrentValue "$($vulnerableProcesses.Count) CyberArk processes: $(($vulnerableProcesses | Select-Object -Unique) -join ', ')" `
-                    -ExpectedValue "Protected from DLL injection" `
-                    -Recommendation "Implement AppLocker/WDAC policies; enable Protected Process Light where possible" `
-                    -Severity "High"
-            }
-            else {
-                Add-Finding -Category "Application Control" `
-                    -CISControl "APPCTL1" `
-                    -Finding "No CyberArk processes found for DLL injection check" `
-                    -Resource "Running Processes" `
-                    -CurrentValue "Verification required" `
-                    -ExpectedValue "Protected processes" `
-                    -Severity "Info" `
-                    -Status "Pass"
-            }
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL1" `
-            -CheckName "DLL Injection Vulnerability" `
-            -Reason "Error checking DLL injection: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-DLLHijackingRisk {
-    Write-AuditLog "Checking for DLL hijacking risks (APPCTL2)..." -Level Info
-
-    try {
-        $vulnerablePaths = @()
-        
-        # Check CyberArk installation directories for writable paths
-        $cyberArkPaths = @(
-            "C:\Program Files (x86)\CyberArk",
-            "C:\Program Files\CyberArk",
-            "C:\inetpub\wwwroot\PasswordVault"
-        )
-
-        foreach ($basePath in $cyberArkPaths) {
-            if (Test-Path $basePath) {
-                $dirs = Get-ChildItem -Path $basePath -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20
-                
-                foreach ($dir in $dirs) {
-                    try {
-                        $acl = Get-Acl $dir.FullName -ErrorAction SilentlyContinue
-                        foreach ($ace in $acl.Access) {
-                            if ($ace.IdentityReference -match "Users|Everyone|Authenticated Users") {
-                                if ($ace.FileSystemRights -match "Write|Modify|FullControl") {
-                                    $vulnerablePaths += $dir.FullName
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-        }
-
-        if ($vulnerablePaths.Count -gt 0) {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL2" `
-                -Finding "Writable directories in CyberArk paths (DLL hijacking risk)" `
-                -Resource "CyberArk Directories" `
-                -CurrentValue "$($vulnerablePaths.Count) writable paths found" `
-                -ExpectedValue "No user-writable directories" `
-                -Recommendation "Remove write permissions for non-admin users on CyberArk directories" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL2" `
-                -Finding "CyberArk directories properly secured" `
-                -Resource "CyberArk Directories" `
-                -CurrentValue "No writable paths for regular users" `
-                -ExpectedValue "Secured directories" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL2" `
-            -CheckName "DLL Hijacking Risk" `
-            -Reason "Error checking DLL hijacking: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-ResourceHijacking {
-    Write-AuditLog "Checking for resource hijacking potential (APPCTL3)..." -Level Info
-
-    try {
-        # File extensions that could be hijacked for privilege escalation
-        $dangerousExtensions = @("*.xml", "*.config", "*.bat", "*.cmd", "*.ps1", "*.vbs", "*.ini", "*.dll")
-        $cyberArkPaths = @(
-            "C:\Program Files (x86)\CyberArk",
-            "C:\Program Files\CyberArk"
-        )
-
-        $replaceableFiles = @()
-
-        foreach ($basePath in $cyberArkPaths) {
-            if (Test-Path $basePath) {
-                foreach ($ext in $dangerousExtensions) {
-                    $files = Get-ChildItem -Path $basePath -Filter $ext -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5
-                    
-                    foreach ($file in $files) {
-                        try {
-                            $acl = Get-Acl $file.FullName -ErrorAction SilentlyContinue
-                            foreach ($ace in $acl.Access) {
-                                if ($ace.IdentityReference -match "Users|Everyone") {
-                                    if ($ace.FileSystemRights -match "Write|Modify|FullControl") {
-                                        $replaceableFiles += $file.Name
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
-        }
-
-        if ($replaceableFiles.Count -gt 0) {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL3" `
-                -Finding "Replaceable resource files found" `
-                -Resource "Configuration Files" `
-                -CurrentValue "$($replaceableFiles.Count) files: $($replaceableFiles[0..4] -join ', ')$(if($replaceableFiles.Count -gt 5){'...'})" `
-                -ExpectedValue "No user-writable config/script files" `
-                -Recommendation "Lock down permissions on configuration and script files" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL3" `
-                -Finding "No replaceable resource files found" `
-                -Resource "Configuration Files" `
-                -CurrentValue "Files properly secured" `
-                -ExpectedValue "Secured files" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL3" `
-            -CheckName "Resource Hijacking" `
-            -Reason "Error checking resource hijacking: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-AppLockerBypassPaths {
-    Write-AuditLog "Checking for AppLocker bypass paths (APPCTL4)..." -Level Info
-
-    try {
-        # Known AppLocker bypass locations
-        $bypassPaths = @(
-            "$env:TEMP",
-            "$env:USERPROFILE\Downloads",
-            "C:\Windows\Tasks",
-            "C:\Windows\Temp",
-            "C:\Windows\tracing",
-            "C:\Windows\System32\FxsTmp",
-            "C:\Windows\System32\spool\drivers\color"
-        )
-
-        $writableBypassPaths = @()
-
-        foreach ($path in $bypassPaths) {
-            if (Test-Path $path) {
-                try {
-                    # Test if we can create files in this location
-                    $testFile = Join-Path $path "applocker_test_$(Get-Random).tmp"
-                    [IO.File]::WriteAllText($testFile, "test")
-                    Remove-Item $testFile -Force -ErrorAction SilentlyContinue
-                    $writableBypassPaths += $path
-                }
-                catch { }
-            }
-        }
-
-        if ($writableBypassPaths.Count -gt 0) {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL4" `
-                -Finding "Writable AppLocker bypass paths found" `
-                -Resource "File System" `
-                -CurrentValue "$($writableBypassPaths.Count) paths: $($writableBypassPaths[0..2] -join ', ')$(if($writableBypassPaths.Count -gt 3){'...'})" `
-                -ExpectedValue "Bypass paths blocked by AppLocker" `
-                -Recommendation "Add AppLocker rules to block script execution from these locations" `
-                -Severity "High"
-        }
-        else {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL4" `
-                -Finding "AppLocker bypass paths secured" `
-                -Resource "File System" `
-                -CurrentValue "No writable bypass paths" `
-                -ExpectedValue "Paths secured" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL4" `
-            -CheckName "AppLocker Bypass Paths" `
-            -Reason "Error checking bypass paths: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
-
-function Test-WritableSystemPaths {
-    Write-AuditLog "Checking for writable system paths (APPCTL5)..." -Level Info
-
-    try {
-        # System paths that should not be writable
-        $systemPaths = @(
-            "$env:SystemRoot\System32",
-            "$env:SystemRoot\SysWOW64",
-            "$env:SystemRoot\Microsoft.NET"
-        )
-
-        $writablePaths = @()
-
-        foreach ($path in $systemPaths) {
-            if (Test-Path $path) {
-                # Check a few subdirectories
-                $subDirs = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | Select-Object -First 10
-                
-                foreach ($dir in $subDirs) {
-                    try {
-                        $acl = Get-Acl $dir.FullName -ErrorAction SilentlyContinue
-                        foreach ($ace in $acl.Access) {
-                            if ($ace.IdentityReference -match "Users|Everyone") {
-                                if ($ace.FileSystemRights -match "Write|Modify|FullControl") {
-                                    $writablePaths += $dir.FullName
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-        }
-
-        $writableCount = $writablePaths.Count
-        
-        if ($writableCount -gt $script:Config.MaxWritableSystemPaths) {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL5" `
-                -Finding "Writable system paths detected" `
-                -Resource "System Directories" `
-                -CurrentValue "$writableCount writable paths found" `
-                -ExpectedValue "$($script:Config.MaxWritableSystemPaths) writable system paths" `
-                -Recommendation "Review and restrict permissions on system directories" `
-                -Severity "Critical"
-        }
-        else {
-            Add-Finding -Category "Application Control" `
-                -CISControl "APPCTL5" `
-                -Finding "System paths properly secured" `
-                -Resource "System Directories" `
-                -CurrentValue "No unexpected writable paths" `
-                -ExpectedValue "Secured system paths" `
-                -Severity "Info" `
-                -Status "Pass"
-        }
-    }
-    catch {
-        Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL5" `
-            -CheckName "Writable System Paths" `
-            -Reason "Error checking system paths: $($_.Exception.Message)" `
-            -Type "Error"
-    }
-}
 
 #======================================================================
 # CONJUR INTEGRATION CHECKS (SEC9-SEC14)
@@ -17829,7 +16682,7 @@ function Export-JSONReport {
         reportInfo = @{
             title = "CyberArk Privileged Access Security Audit Report"
             generatedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
-            generatedBy = "CyberArk Security Audit Tool v4.2"
+            generatedBy = "CyberArk Security Audit Tool v4.4"
             reportVersion = "2.0"
             exportFormat = "JSON"
         }
@@ -17964,25 +16817,6 @@ function Export-JSONReport {
 function Start-Audit {
     # Display detailed info unless suppressed with -NoLogo
     if (-not $NoLogo) {
-        Write-Host "  Check Categories:" -ForegroundColor Gray
-        Write-Host "    [UNAUTH] Blackbox/Network/CVE Security (No auth required)" -ForegroundColor DarkGray
-        Write-Host "    [AUTH]   CIS/Vendor/Identity Governance (CyberArk auth)" -ForegroundColor DarkGray
-        Write-Host "    [AUTH]   Machine Identity/Secrets/ZSP/Cloud/DR/AD Security" -ForegroundColor DarkGray
-        Write-Host "    [HOST]   Windows Host/Server/Component Hardening (Local admin)" -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  New in v4.2: Red Team Enhancements" -ForegroundColor Red
-        Write-Host "    - OPSEC Mode: Stealth scanning with delays/jitter" -ForegroundColor DarkRed
-        Write-Host "    - Proxy Support: Route through Burp/ZAP" -ForegroundColor DarkRed
-        Write-Host "    - Timing Attacks: Authentication enumeration" -ForegroundColor DarkRed
-        Write-Host "    - JWT/OAuth2: Token security testing" -ForegroundColor DarkRed
-        Write-Host "    - WebSocket: Real-time endpoint discovery" -ForegroundColor DarkRed
-        Write-Host "    - WAF Evasion: Encoding bypass detection" -ForegroundColor DarkRed
-        Write-Host ""
-        Write-Host "  CyberArk Tools Integration (v4.1):" -ForegroundColor Cyan
-        Write-Host "    - zBang: AD security (Shadow Admins, Kerberos, SPNs)" -ForegroundColor DarkCyan
-        Write-Host "    - CYBRHardeningCheck: Vault/PSM/PVWA/CPM hardening" -ForegroundColor DarkCyan
-        Write-Host "    - Evasor: Application control bypass detection" -ForegroundColor DarkCyan
-        Write-Host "    - Conjur: Secrets Manager integration" -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  Target: $PVWA" -ForegroundColor White
         if ($Proxy) { Write-Host "  Proxy: $Proxy" -ForegroundColor Yellow }
@@ -18108,8 +16942,26 @@ function Start-Audit {
         Write-Host "=====================================" -ForegroundColor Yellow
         try { Test-CVE2025EPM } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE7" -CheckName "CVE-2025 EPM Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CVE2025SecretsManager } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE12" -CheckName "CVE-2025 Secrets Manager Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-CVE202457967 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE20" -CheckName "CVE-2024-57967 LDAP Privilege Escalation" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-CVE202454840 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE21" -CheckName "CVE-2024-54840 Host Header Injection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-CVE202222700 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE22" -CheckName "CVE-2022-22700 Username Enumeration (X-CFY-TX-TM)" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-CVE202137151 } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE23" -CheckName "CVE-2021-37151 Username Enumeration (MFA Response)" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-PrototypePollution } catch { Add-SkippedCheck -Category "Third-Party Vulnerabilities" -CISControl "TP2" -CheckName "ag-grid Prototype Pollution" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
         try { Test-CA25Bulletins } catch { Add-SkippedCheck -Category "CVE Assessment" -CISControl "CA25-32" -CheckName "CA25 Security Bulletins" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+
+        # Additional Security Checks (Non-CVE)
+        Write-Host ""
+        Write-Host "[UNAUTH] Running Additional Security Checks..." -ForegroundColor Yellow
+        Write-Host "================================================" -ForegroundColor Yellow
+
+        try { Test-UsernameEnumeration } catch { Add-SkippedCheck -Category "Authentication Security" -CISControl "AUTH1" -CheckName "Username Enumeration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-SecurityHeaders } catch { Add-SkippedCheck -Category "Security Headers" -CISControl "HDR1" -CheckName "Security Headers" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-IISHardening } catch { Add-SkippedCheck -Category "IIS Hardening" -CISControl "IIS1" -CheckName "IIS Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-APISecurityIssues } catch { Add-SkippedCheck -Category "API Security" -CISControl "API6" -CheckName "API Security Issues" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-AuthenticationWeaknesses } catch { Add-SkippedCheck -Category "Authentication Security" -CISControl "AUTH2" -CheckName "Authentication Weaknesses" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-InformationDisclosure } catch { Add-SkippedCheck -Category "Information Disclosure" -CISControl "INFO1" -CheckName "Information Disclosure" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-NetworkProtocolIssues } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET8" -CheckName "Network Protocol Issues" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        try { Test-CyberArkSpecificIssues } catch { Add-SkippedCheck -Category "CyberArk Security" -CISControl "CA1" -CheckName "CyberArk-Specific Issues" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     }
     else {
         Add-SkippedCheck -Category "CVE Assessment" -CISControl "CVE1" `
@@ -18193,7 +17045,7 @@ function Start-Audit {
         Write-Host ""
         Write-Host "+============================================================+" -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray
-        Write-Host "â•‘  (Use without -UnauthenticatedOnly to run these checks)  â•‘" -ForegroundColor DarkGray
+        Write-Host " (Use without -UnauthenticatedOnly to run these checks) " -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray
 
         # Record all authenticated checks as skipped
@@ -18222,7 +17074,7 @@ function Start-Audit {
         Write-Host ""
         Write-Host "+============================================================+" -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray
-        Write-Host "â•‘  (Skipped via -SkipAuthenticatedChecks parameter)        â•‘" -ForegroundColor DarkGray
+        Write-Host "Ã¢â€¢â€˜  (Skipped via -SkipAuthenticatedChecks parameter)        Ã¢â€¢â€˜" -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray
 
         Add-SkippedCheck -Category "Authenticated Checks" -CISControl "3.1" `
@@ -18344,10 +17196,10 @@ function Start-Audit {
                     try { Test-ComplianceMapping } catch { Add-SkippedCheck -Category "Compliance Mapping" -CISControl "COMP1" -CheckName "Compliance Mapping" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
 
-                # New v4.1 AD Security Checks (zBang-inspired)
+                # New v4.1 AD Security Checks
                 if ($IncludeADChecks) {
                     Write-Host ""
-                    Write-Host "[AUTH] Running Active Directory Security Checks (zBang-inspired)..." -ForegroundColor Yellow
+                    Write-Host "[AUTH] Running Active Directory Security Checks..." -ForegroundColor Yellow
                     Write-Host "=====================================================================" -ForegroundColor Yellow
                     try { Test-ADSecurity } catch { Add-SkippedCheck -Category "AD Security" -CISControl "AD1" -CheckName "AD Security Checks" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
                 }
@@ -18528,132 +17380,6 @@ function Start-Audit {
         }
     }
 
-    #======================================================================
-    # PHASE 3: HOST SECURITY CHECKS (Local admin on CyberArk server)
-    # NOTE: This tool is designed for REMOTE auditing. Host checks examine
-    # the LOCAL machine, not the CyberArk servers. Only enable with
-    # -IncludeLocalHostChecks if running directly on a CyberArk server.
-    #======================================================================
-    
-    # Determine if host checks should run (default: skip for remote audits)
-    $runHostChecks = $IncludeLocalHostChecks -and (-not $SkipHostChecks)
-    
-    if ($runHostChecks) {
-        Write-Host ""
-        Write-Host "+============================================================+" -ForegroundColor Blue
-        Write-Host "|  PHASE 3: LOCAL HOST SECURITY CHECKS                     |" -ForegroundColor Blue
-        Write-Host "|  (Checking THIS machine - ensure you're on CyberArk server)|" -ForegroundColor Blue
-        Write-Host "+============================================================+" -ForegroundColor Blue
-        Write-Host ""
-        Write-Host "  WARNING: These checks examine the LOCAL machine." -ForegroundColor Yellow
-        Write-Host "  Only use -IncludeLocalHostChecks when running directly" -ForegroundColor Yellow
-        Write-Host "  on a CyberArk server component." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Checking:" -ForegroundColor Cyan
-        Write-Host "  - Windows Firewall configuration" -ForegroundColor Gray
-        Write-Host "  - CyberArk service account settings" -ForegroundColor Gray
-        Write-Host "  - Credential caching (WDigest, LSA Protection)" -ForegroundColor Gray
-        Write-Host "  - Windows Event Log configuration" -ForegroundColor Gray
-        Write-Host "  - Antivirus/EDR status" -ForegroundColor Gray
-        Write-Host "  - CyberArk service health" -ForegroundColor Gray
-        Write-Host ""
-
-        Test-HostSecurity
-
-        # New v4.1 Component-Specific Hardening Checks
-        if (-not $SkipHardeningChecks) {
-            Write-Host ""
-            Write-Host "[HOST] Running Server Hardening Checks (CYBRHardeningCheck-inspired)..." -ForegroundColor Yellow
-            Write-Host "=======================================================================" -ForegroundColor Yellow
-            try { Test-ServerHardening } catch { Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" -CheckName "Server Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-
-            Write-Host ""
-            Write-Host "[HOST] Running Vault Hardening Checks..." -ForegroundColor Yellow
-            Write-Host "=========================================" -ForegroundColor Yellow
-            try { Test-VaultHardening } catch { Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT1" -CheckName "Vault Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-
-            Write-Host ""
-            Write-Host "[HOST] Running PSM Hardening Checks..." -ForegroundColor Yellow
-            Write-Host "=======================================" -ForegroundColor Yellow
-            try { Test-PSMHardening } catch { Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH1" -CheckName "PSM Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-
-            Write-Host ""
-            Write-Host "[HOST] Running PVWA Hardening Checks..." -ForegroundColor Yellow
-            Write-Host "========================================" -ForegroundColor Yellow
-            try { Test-PVWAHardening } catch { Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH1" -CheckName "PVWA Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-
-            Write-Host ""
-            Write-Host "[HOST] Running CPM Hardening Checks..." -ForegroundColor Yellow
-            Write-Host "=======================================" -ForegroundColor Yellow
-            try { Test-CPMHardening } catch { Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH1" -CheckName "CPM Hardening" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-
-            # Application Control Checks (Evasor-inspired)
-            if ($IncludeAppControlChecks) {
-                Write-Host ""
-                Write-Host "[HOST] Running Application Control Checks (Evasor-inspired)..." -ForegroundColor Yellow
-                Write-Host "================================================================" -ForegroundColor Yellow
-                try { Test-ApplicationControl } catch { Add-SkippedCheck -Category "Application Control" -CISControl "APPCTL1" -CheckName "Application Control" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-            }
-        }
-    }
-    else {
-        # Host checks skipped (default for remote audits)
-        Write-Host ""
-        Write-Host "+============================================================+" -ForegroundColor DarkGray
-        Write-Host "|  PHASE 3: HOST SECURITY CHECKS - SKIPPED (Remote Audit)  |" -ForegroundColor DarkGray
-        Write-Host "+============================================================+" -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  Host checks are skipped by default for remote audits." -ForegroundColor DarkGray
-        Write-Host "  These checks examine the LOCAL machine, not CyberArk servers." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  To run local host checks (only if on a CyberArk server):" -ForegroundColor DarkGray
-        Write-Host "    -IncludeLocalHostChecks" -ForegroundColor Gray
-        Write-Host ""
-
-        # Record skipped checks with appropriate reason
-        $skipReason = "Remote audit - host checks examine local machine, not CyberArk servers. Use -IncludeLocalHostChecks if running on CyberArk server."
-        
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST1" `
-            -CheckName "Windows Firewall Configuration" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST2" `
-            -CheckName "Service Account Privileges" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST3" `
-            -CheckName "Credential Caching Configuration" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST4" `
-            -CheckName "Event Log Configuration" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Host Security" -CISControl "HOST5" `
-            -CheckName "Antivirus/EDR Status" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Server Hardening" -CISControl "HARD1" `
-            -CheckName "Server Hardening Checks" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "Vault Hardening" -CISControl "VAULT1" `
-            -CheckName "Vault Hardening Checks" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "PSM Hardening" -CISControl "PSMH1" `
-            -CheckName "PSM Hardening Checks" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "PVWA Hardening" -CISControl "PVWAH1" `
-            -CheckName "PVWA Hardening Checks" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-        Add-SkippedCheck -Category "CPM Hardening" -CISControl "CPMH1" `
-            -CheckName "CPM Hardening Checks" `
-            -Reason $skipReason `
-            -Type "NotApplicable"
-    }
 
     #======================================================================
     # REPORT GENERATION
@@ -18705,12 +17431,6 @@ function Start-Audit {
     }
     else {
         Write-Host "  Phase 2 (Authenticated):   Failed (auth error)" -ForegroundColor Red
-    }
-    if ($IncludeLocalHostChecks -and (-not $SkipHostChecks)) {
-        Write-Host "  Phase 3 (Host Security):   Completed (local machine)" -ForegroundColor Green
-    }
-    else {
-        Write-Host "  Phase 3 (Host Security):   Skipped (remote audit - use -IncludeLocalHostChecks if on CyberArk server)" -ForegroundColor DarkGray
     }
     Write-Host ""
     Write-Host "Findings:" -ForegroundColor Cyan
