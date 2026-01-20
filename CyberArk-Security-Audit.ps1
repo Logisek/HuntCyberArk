@@ -56,6 +56,25 @@
     WARNING: Enable password spraying and brute force testing (requires explicit user confirmation)
     This parameter must be explicitly set to enable any password spraying or brute force functionality.
     By default, the script only tests known default passwords to avoid account lockouts.
+.PARAMETER OnlyPortScan
+    Run ONLY port scanning checks - skips all other checks
+.PARAMETER OnlyCVEChecks
+    Run ONLY CVE vulnerability checks - skips all other checks
+.PARAMETER OnlyAuthenticatedChecks
+    Run ONLY authenticated API checks - skips unauthenticated/blackbox checks
+.PARAMETER OnlyNetworkChecks
+    Run ONLY network security checks (TLS, ports, DNS) - skips all other checks
+.PARAMETER OnlyBlackboxChecks
+    Run ONLY unauthenticated blackbox checks - skips authenticated checks
+.EXAMPLE
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyPortScan
+    # Run only port scanning
+.EXAMPLE
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyCVEChecks
+    # Run only CVE vulnerability checks
+.EXAMPLE
+    .\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyAuthenticatedChecks -Credential $cred
+    # Run only authenticated API checks
 .NOTES    
     WARNING: Some tests (port scanning, CVE checks, WAF evasion) may trigger security alerts.
     Always obtain proper authorization before running this script.
@@ -361,7 +380,23 @@ param(
 
     # Offensive Security Features (Require explicit user confirmation)
     [Parameter(Mandatory = $false)]
-    [switch]$EnablePasswordSpraying
+    [switch]$EnablePasswordSpraying,
+
+    # Selective Execution - Run ONLY specific check categories
+    [Parameter(Mandatory = $false)]
+    [switch]$OnlyPortScan,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$OnlyCVEChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$OnlyAuthenticatedChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$OnlyNetworkChecks,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$OnlyBlackboxChecks
 )
 
 #region Configuration
@@ -1229,12 +1264,17 @@ function Clear-SensitiveData {
 function Write-AuditLog {
     param(
         [string]$Message,
-        [ValidateSet("Info", "Warning", "Error", "Success")]
+        [ValidateSet("Info", "Warning", "Error", "Success", "Debug")]
         [string]$Level = "Info"
     )
 
     # Respect quiet mode
     if ($QuietMode -and $Level -eq "Info") {
+        return
+    }
+
+    # Debug messages only shown when VerboseOutput is enabled
+    if ($Level -eq "Debug" -and -not $VerboseOutput) {
         return
     }
 
@@ -1244,6 +1284,7 @@ function Write-AuditLog {
         "Warning" { "Yellow" }
         "Error"   { "Red" }
         "Success" { "Green" }
+        "Debug"   { "DarkGray" }
     }
 
     Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
@@ -1271,7 +1312,15 @@ function Add-Finding {
         [string[]]$References = @(),
         [string]$CVSSScore = "",
         [string]$TechnicalDetails = "",
-        [string]$BusinessImpact = ""
+        [string]$BusinessImpact = "",
+        # Request/Response PoC fields for penetration testing evidence
+        [string]$RequestMethod = "",
+        [string]$RequestURL = "",
+        [hashtable]$RequestHeaders = @{},
+        [string]$RequestBody = "",
+        [int]$ResponseStatus = 0,
+        [hashtable]$ResponseHeaders = @{},
+        [string]$ResponseBody = ""
     )
 
     # Auto-derive affected component from category if not provided
@@ -1350,6 +1399,36 @@ function Add-Finding {
         }
     }
 
+    # Build PoC (Proof of Concept) request/response evidence if available
+    $pocRequest = ""
+    $pocResponse = ""
+
+    if ($RequestMethod -or $RequestURL) {
+        $pocRequest = "$RequestMethod $RequestURL HTTP/1.1`n"
+        foreach ($header in $RequestHeaders.GetEnumerator()) {
+            $pocRequest += "$($header.Key): $($header.Value)`n"
+        }
+        if ($RequestBody) {
+            $pocRequest += "`n$RequestBody"
+        }
+    }
+
+    if ($ResponseStatus -gt 0) {
+        $pocResponse = "HTTP/1.1 $ResponseStatus`n"
+        foreach ($header in $ResponseHeaders.GetEnumerator()) {
+            $pocResponse += "$($header.Key): $($header.Value)`n"
+        }
+        if ($ResponseBody) {
+            # Truncate response body if too long (max 2000 chars for readability)
+            $truncatedBody = if ($ResponseBody.Length -gt 2000) {
+                $ResponseBody.Substring(0, 2000) + "`n... [TRUNCATED - $($ResponseBody.Length) total bytes]"
+            } else {
+                $ResponseBody
+            }
+            $pocResponse += "`n$truncatedBody"
+        }
+    }
+
     $script:Findings += [PSCustomObject]@{
         # Core finding information
         FindingID           = "CA-$(Get-Date -Format 'yyyyMMdd')-$([guid]::NewGuid().ToString().Substring(0,8).ToUpper())"
@@ -1364,7 +1443,7 @@ function Add-Finding {
         Severity            = $Severity
         Status              = $Status
         Timestamp           = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        
+
         # Enhanced reporting fields
         AffectedComponent   = $AffectedComponent
         Evidence            = $Evidence
@@ -1375,7 +1454,12 @@ function Add-Finding {
         RemediationSteps    = $RemediationSteps -join "`n"
         ComplianceRefs      = $ComplianceRefs -join "; "
         References          = if ($References.Count -gt 0) { $References -join "; " } else { "https://docs.cyberark.com/; CIS CyberArk Benchmark" }
-        
+
+        # Request/Response PoC evidence
+        PoCRequest          = $pocRequest
+        PoCResponse         = $pocResponse
+        HasPoC              = ($pocRequest -ne "" -or $pocResponse -ne "")
+
         # Audit trail
         AuditTarget         = $script:PVWA
         AuditorNotes        = ""
@@ -1491,6 +1575,20 @@ function Test-InteractiveSession {
 function Connect-CyberArk {
     Write-AuditLog "Connecting to CyberArk PVWA: $PVWA" -Level Info
 
+    # Detect if this is a Privilege Cloud / CyberArk Identity URL
+    $isPrivilegeCloud = $PVWA -match '\.cyberark\.cloud'
+    $isIdentityUrl = $PVWA -match '\.id\.cyberark\.cloud'
+
+    if ($isIdentityUrl) {
+        Write-AuditLog "Detected CyberArk Identity URL. For Privilege Cloud PVWA access, use the .privilegecloud.cyberark.cloud domain." -Level Warning
+        Write-AuditLog "Example: https://your-tenant.privilegecloud.cyberark.cloud" -Level Info
+
+        # Try to construct the PVWA URL from the Identity URL
+        $tenantId = ($PVWA -replace 'https?://' -replace '\.id\.cyberark\.cloud.*', '')
+        $suggestedPvwaUrl = "https://$tenantId.privilegecloud.cyberark.cloud"
+        Write-AuditLog "Suggested PVWA URL: $suggestedPvwaUrl" -Level Info
+    }
+
     if (-not $Credential) {
         if (Test-InteractiveSession) {
             try {
@@ -1519,12 +1617,90 @@ function Connect-CyberArk {
             password = $Credential.GetNetworkCredential().Password
         } | ConvertTo-Json
 
-        $response = Invoke-RestMethod -Uri "$PVWA/PasswordVault/api/Auth/$AuthType/Logon" `
-            -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30
+        # Try different authentication endpoints based on the target
+        $authEndpoints = @()
 
-        $script:Headers = @{ Authorization = $response }
-        Write-AuditLog "Successfully authenticated to CyberArk" -Level Success
-        return $true
+        if ($isPrivilegeCloud) {
+            # Privilege Cloud authentication endpoints
+            $authEndpoints = @(
+                "$PVWA/PasswordVault/api/Auth/CyberArk/Logon",
+                "$PVWA/PasswordVault/API/auth/Cyberark/CyberArkAuthenticationService.svc/Logon",
+                "$PVWA/api/Auth/CyberArk/Logon"
+            )
+
+            # If using Identity URL, also try to authenticate via Identity platform
+            if ($isIdentityUrl) {
+                # CyberArk Identity uses different auth flow
+                Write-AuditLog "Attempting CyberArk Identity authentication..." -Level Info
+
+                $identityAuthBody = @{
+                    User = $Credential.UserName
+                    Version = "1.0"
+                } | ConvertTo-Json
+
+                try {
+                    $startAuthResponse = Invoke-RestMethod -Uri "$PVWA/Security/StartAuthentication" `
+                        -Method POST -Body $identityAuthBody -ContentType "application/json" -TimeoutSec 30
+
+                    if ($startAuthResponse.Result.Challenges) {
+                        # Need to complete authentication challenge (e.g., password)
+                        $challengeBody = @{
+                            SessionId = $startAuthResponse.Result.SessionId
+                            MechanismId = $startAuthResponse.Result.Challenges[0].Mechanisms[0].MechanismId
+                            Action = "Answer"
+                            Answer = $Credential.GetNetworkCredential().Password
+                        } | ConvertTo-Json
+
+                        $advanceAuthResponse = Invoke-RestMethod -Uri "$PVWA/Security/AdvanceAuthentication" `
+                            -Method POST -Body $challengeBody -ContentType "application/json" -TimeoutSec 30
+
+                        if ($advanceAuthResponse.Result.Token) {
+                            $script:Headers = @{ Authorization = "Bearer $($advanceAuthResponse.Result.Token)" }
+                            Write-AuditLog "Successfully authenticated to CyberArk Identity" -Level Success
+                            return $true
+                        }
+                    }
+                }
+                catch {
+                    Write-AuditLog "Identity authentication failed: $($_.Exception.Message)" -Level Warning
+                    Write-AuditLog "Falling back to standard PVWA authentication..." -Level Info
+                }
+            }
+        }
+        else {
+            # On-premises PVWA authentication endpoints
+            $authEndpoints = @(
+                "$PVWA/PasswordVault/api/Auth/$AuthType/Logon",
+                "$PVWA/PasswordVault/API/Auth/$AuthType/Logon"
+            )
+        }
+
+        # Try each authentication endpoint
+        $lastError = $null
+        foreach ($endpoint in $authEndpoints) {
+            try {
+                Write-AuditLog "Trying authentication endpoint: $endpoint" -Level Info
+                $response = Invoke-RestMethod -Uri $endpoint `
+                    -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30
+
+                if ($response) {
+                    $script:Headers = @{ Authorization = $response }
+                    Write-AuditLog "Successfully authenticated to CyberArk" -Level Success
+                    return $true
+                }
+            }
+            catch {
+                $lastError = $_.Exception.Message
+                # Continue to next endpoint
+            }
+        }
+
+        if ($lastError) {
+            throw $lastError
+        }
+
+        Write-AuditLog "All authentication endpoints failed" -Level Error
+        return $false
     }
     catch {
         Write-AuditLog "Authentication failed: $($_.Exception.Message)" -Level Error
@@ -1532,8 +1708,8 @@ function Connect-CyberArk {
     }
     finally {
         # Securely clear sensitive credential data from memory
-        if ($body) { 
-            $body = $null 
+        if ($body) {
+            $body = $null
         }
         Remove-Variable body -ErrorAction SilentlyContinue
         [System.GC]::Collect()
@@ -2593,25 +2769,58 @@ function Test-PVWASecurity {
         if ($PSVersionTable.PSVersion.Major -lt 6) {
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
         }
-        
-        # Build request parameters
-        $webParams = @{
-            Uri             = "$PVWA/PasswordVault/v10/logon"
-            Method          = "HEAD"
-            UseBasicParsing = $true
-            TimeoutSec      = 10
-            ErrorAction     = "Stop"
+
+        # Try multiple endpoints to get headers - some may not exist on all versions
+        $endpointsToTry = @(
+            "/PasswordVault/",
+            "/PasswordVault/api/",
+            "/PasswordVault/WebServices/",
+            "/PasswordVault/v10/logon"
+        )
+
+        $response = $null
+        $lastError = $null
+
+        foreach ($endpoint in $endpointsToTry) {
+            try {
+                # Build request parameters
+                $webParams = @{
+                    Uri             = "$PVWA$endpoint"
+                    Method          = "GET"
+                    UseBasicParsing = $true
+                    TimeoutSec      = 10
+                    ErrorAction     = "Stop"
+                }
+
+                # Add SkipCertificateCheck for PowerShell 6+
+                if ($PSVersionTable.PSVersion.Major -ge 6) {
+                    $webParams.SkipCertificateCheck = $true
+                }
+
+                # Make a request to PVWA to check security headers
+                $response = Invoke-WebRequest @webParams
+                Write-AuditLog "Successfully retrieved headers from $endpoint" -Level Info
+                break
+            }
+            catch {
+                $lastError = $_
+                # Continue to next endpoint
+            }
         }
-        
-        # Add SkipCertificateCheck for PowerShell 6+
-        if ($PSVersionTable.PSVersion.Major -ge 6) {
-            $webParams.SkipCertificateCheck = $true
+
+        if (-not $response) {
+            throw $lastError
         }
-        
-        # Make a request to PVWA to check security headers
-        $response = Invoke-WebRequest @webParams
 
         $headers = $response.Headers
+
+        # Build response headers hashtable for PoC evidence
+        $pocResponseHeaders = @{}
+        foreach ($headerKey in $headers.Keys) {
+            $pocResponseHeaders[$headerKey] = $headers[$headerKey] -join "; "
+        }
+        $pocRequestUrl = "$PVWA$endpoint"
+        $pocRequestHeaders = @{ "Host" = ([System.Uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit/1.0" }
 
         # Check: Strict-Transport-Security
         if (-not $headers["Strict-Transport-Security"]) {
@@ -2668,7 +2877,13 @@ function Test-PVWASecurity {
                 -CurrentValue "Missing" `
                 -ExpectedValue "CSP header defined" `
                 -Recommendation "Configure Content-Security-Policy header" `
-                -Severity "Medium"
+                -Severity "Medium" `
+                -RequestMethod "GET" `
+                -RequestURL $pocRequestUrl `
+                -RequestHeaders $pocRequestHeaders `
+                -ResponseStatus $response.StatusCode `
+                -ResponseHeaders $pocResponseHeaders `
+                -ResponseBody "Response headers do not include Content-Security-Policy"
         }
 
         # Check: Server header disclosure
@@ -2819,6 +3034,231 @@ function Test-AccountGroups {
 # BLACKBOX / EXTERNAL SECURITY CHECKS
 #======================================================================
 
+# Global baseline response storage for false positive detection
+$script:BaselineResponse = @{
+    ContentLength = 0
+    ContentHash = ""
+    IsEstablished = $false
+    ContentType = ""
+    SampleContent = ""
+}
+
+<#
+.SYNOPSIS
+    Establishes a baseline response by fetching a non-existent URL to fingerprint the default response
+.DESCRIPTION
+    CyberArk Privilege Cloud and similar SPA applications return the same login/default page
+    for any non-existent URL (catch-all routing). This function establishes that baseline
+    so we can detect false positives when checking for sensitive files.
+#>
+function Initialize-BaselineResponse {
+    param (
+        [string]$BaseUrl
+    )
+
+    Write-AuditLog "Establishing baseline response for false positive detection..." -Level Info
+
+    # Generate a random URL that definitely doesn't exist
+    $randomPath = "/" + [guid]::NewGuid().ToString("N") + "_nonexistent_test_" + (Get-Random -Maximum 99999)
+    $testUrl = "$BaseUrl$randomPath"
+
+    try {
+        $response = Invoke-WebRequest -Uri $testUrl -Method GET -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+
+        $script:BaselineResponse.ContentLength = $response.Content.Length
+        $script:BaselineResponse.ContentType = $response.Headers['Content-Type']
+        $script:BaselineResponse.SampleContent = $response.Content.Substring(0, [Math]::Min(500, $response.Content.Length))
+
+        # Create a hash of the first 2000 chars for comparison
+        $hashContent = $response.Content.Substring(0, [Math]::Min(2000, $response.Content.Length))
+        $script:BaselineResponse.ContentHash = [System.BitConverter]::ToString(
+            [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                [System.Text.Encoding]::UTF8.GetBytes($hashContent)
+            )
+        ).Replace("-", "")
+
+        $script:BaselineResponse.IsEstablished = $true
+
+        Write-AuditLog "Baseline established: $($script:BaselineResponse.ContentLength) bytes, Type: $($script:BaselineResponse.ContentType)" -Level Info
+        Write-AuditLog "This baseline will be used to filter false positives (catch-all/SPA responses)" -Level Info
+
+        return $true
+    }
+    catch {
+        Write-AuditLog "Could not establish baseline (server returned error for non-existent URL - good!)" -Level Info
+        $script:BaselineResponse.IsEstablished = $false
+        return $false
+    }
+}
+
+<#
+.SYNOPSIS
+    Checks if a response matches the baseline (indicating it's a catch-all/default page)
+.DESCRIPTION
+    Returns $true if the response appears to be the same default page returned for non-existent URLs
+#>
+function Test-IsBaselineResponse {
+    param (
+        [string]$ResponseContent,
+        [string]$ContentType = "",
+        [int]$Tolerance = 100  # Allow some variance in content length
+    )
+
+    if (-not $script:BaselineResponse.IsEstablished) {
+        return $false
+    }
+
+    # Check content length match (within tolerance)
+    $lengthMatch = [Math]::Abs($ResponseContent.Length - $script:BaselineResponse.ContentLength) -le $Tolerance
+
+    if ($lengthMatch) {
+        # Double-check with hash comparison of first 2000 chars
+        $hashContent = $ResponseContent.Substring(0, [Math]::Min(2000, $ResponseContent.Length))
+        $responseHash = [System.BitConverter]::ToString(
+            [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+                [System.Text.Encoding]::UTF8.GetBytes($hashContent)
+            )
+        ).Replace("-", "")
+
+        if ($responseHash -eq $script:BaselineResponse.ContentHash) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+<#
+.SYNOPSIS
+    Validates if an API response is legitimate (not a catch-all/false positive)
+.DESCRIPTION
+    Comprehensive helper to validate API responses for CVE checks.
+    Returns $true if the response appears to be a legitimate API response.
+    Returns $false if it's a catch-all page, HTML login page, or other false positive.
+.PARAMETER ResponseContent
+    The response body content to validate
+.PARAMETER RequireJSON
+    If $true, requires the response to be valid JSON
+.PARAMETER RequirePatterns
+    Array of regex patterns - at least one must match for response to be valid
+.PARAMETER RejectPatterns
+    Array of regex patterns - if any match, response is rejected as false positive
+.RETURNS
+    Boolean - $true if response is valid, $false if it's a false positive
+#>
+function Test-IsValidAPIResponse {
+    param (
+        [string]$ResponseContent,
+        [bool]$RequireJSON = $false,
+        [string[]]$RequirePatterns = @(),
+        [string[]]$RejectPatterns = @()
+    )
+
+    # Check 1: Skip if baseline/catch-all response
+    if (Test-IsBaselineResponse -ResponseContent $ResponseContent) {
+        return $false
+    }
+
+    # Check 2: Skip generic HTML responses (SPA login pages)
+    if ($ResponseContent -match "<!DOCTYPE|<html|<head|<body" -and
+        $ResponseContent -notmatch '"api"|"swagger"|"error":\s*\{') {
+        return $false
+    }
+
+    # Check 3: Require JSON if specified
+    if ($RequireJSON -and $ResponseContent -notmatch '^\s*[\{\[]') {
+        return $false
+    }
+
+    # Check 4: Check reject patterns (false positive indicators)
+    foreach ($pattern in $RejectPatterns) {
+        if ($ResponseContent -match $pattern) {
+            return $false
+        }
+    }
+
+    # Check 5: Check require patterns (at least one must match if specified)
+    if ($RequirePatterns.Count -gt 0) {
+        $matched = $false
+        foreach ($pattern in $RequirePatterns) {
+            if ($ResponseContent -match $pattern) {
+                $matched = $true
+                break
+            }
+        }
+        if (-not $matched) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+<#
+.SYNOPSIS
+    Validates if a file response is actually the expected file type, not a catch-all page
+.DESCRIPTION
+    Checks Content-Type and content patterns to determine if a response is actually
+    the file we're looking for or a default/error page
+#>
+function Test-IsValidFileResponse {
+    param (
+        [string]$ResponseContent,
+        [string]$ContentType,
+        [string]$ExpectedExtension  # e.g., ".config", ".xml", ".json", ".ini"
+    )
+
+    # First check if it matches baseline (catch-all page)
+    if (Test-IsBaselineResponse -ResponseContent $ResponseContent) {
+        return $false
+    }
+
+    # Check Content-Type matches expected file type
+    $expectedContentTypes = @{
+        ".config" = @("text/xml", "application/xml", "application/octet-stream")
+        ".xml" = @("text/xml", "application/xml")
+        ".json" = @("application/json", "text/json")
+        ".ini" = @("text/plain", "application/octet-stream")
+        ".txt" = @("text/plain")
+        ".log" = @("text/plain", "application/octet-stream")
+        ".bak" = @("text/xml", "application/xml", "application/octet-stream", "text/plain")
+        ".old" = @("text/xml", "application/xml", "application/octet-stream", "text/plain")
+    }
+
+    # If we get text/html for a config/xml file, it's likely a false positive
+    if ($ContentType -match "text/html" -and $ExpectedExtension -match "\.(config|xml|json|ini|bak|old)$") {
+        # HTML response for non-HTML file is suspicious
+        # Check if content looks like HTML (login page) vs actual file content
+        if ($ResponseContent -match "<!DOCTYPE html>|<html>|<head>|<body>") {
+            return $false
+        }
+    }
+
+    # Check for actual file content patterns
+    switch -Regex ($ExpectedExtension) {
+        "\.(config|xml)$" {
+            # Should contain XML structure
+            if ($ResponseContent -notmatch "^\s*<\?xml|^\s*<configuration|^\s*<[a-zA-Z]") {
+                return $false
+            }
+        }
+        "\.json$" {
+            # Should be valid JSON structure
+            if ($ResponseContent -notmatch "^\s*[\[{]") {
+                return $false
+            }
+        }
+        "\.ini$" {
+            # Should contain INI-style content
+            if ($ResponseContent -notmatch "^\s*\[.*\]|^\s*[a-zA-Z]+=") {
+                return $false
+            }
+        }
+    }
+
+    return $true
+}
+
 # Helper function to detect "soft 404" responses that return HTTP 200 but indicate page not found
 function Test-IsSoft404Response {
     param (
@@ -2835,8 +3275,30 @@ function Test-IsSoft404Response {
         return $true
     }
 
+    # FIRST: Check if this matches the established baseline response (catch-all/SPA page)
+    if (Test-IsBaselineResponse -ResponseContent $ResponseContent) {
+        return $true
+    }
+
     # Patterns that indicate a "soft 404" or error page despite HTTP 200 status
     $soft404Patterns = @(
+        # CyberArk Privilege Cloud SPA patterns (these indicate the catch-all login page)
+        "/vfslow/lib/ui/",
+        "/uibuild/compiled/",
+        "jsutil/external/jquery",
+        "vfslow/lib/uibuild",
+        "open-sans.css",
+        # CyberArk Identity SPA bootstrap patterns
+        "cyberark.cloud/vfslow",
+        "cyberark.cloud/vf/",
+        "_ver=\d+",
+        # Generic SPA/Angular/React catch-all patterns
+        "app-root",
+        "ng-app",
+        "data-reactroot",
+        "__NEXT_DATA__",
+        "window.__INITIAL_STATE__",
+        "window.__PRELOADED_STATE__",
         # Generic "not found" patterns
         "couldn't find this page",
         "could not find this page",
@@ -3006,9 +3468,21 @@ function Test-ExposedEndpoints {
             if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
                 $body = $response.Content
 
+                # Check for baseline catch-all response (CyberArk SPA returns same page for all URLs)
+                if (Test-IsBaselineResponse -ResponseContent $body) {
+                    Write-AuditLog "Skipping $($endpoint.Path) - response matches baseline catch-all page" -Level Debug
+                    continue
+                }
+
                 # Check for soft 404 responses (pages that return 200 but indicate "not found")
                 if (Test-IsSoft404Response -ResponseContent $body) {
                     Write-AuditLog "Skipping $($endpoint.Path) - detected soft 404 page" -Level Debug
+                    continue
+                }
+
+                # Check for CDN/CloudFront error pages (may return 200 with HTML error content)
+                if ($body -match "502 ERROR|503 ERROR|CloudFront|Lambda function|The request could not be satisfied") {
+                    Write-AuditLog "Skipping $($endpoint.Path) - detected CDN error page" -Level Debug
                     continue
                 }
 
@@ -3033,7 +3507,7 @@ function Test-ExposedEndpoints {
                 Add-Finding -Category "Exposed Endpoints" `
                     -CISControl "BB1" `
                     -Finding "Sensitive endpoint accessible without authentication" `
-                    -Resource $endpoint.Path `
+                    -Resource "$PVWA$($endpoint.Path)" `
                     -CurrentValue "HTTP 200 - Accessible (Content Length: $($body.Length) bytes)" `
                     -ExpectedValue "HTTP 401/403 or not found" `
                     -Recommendation "Restrict access to $($endpoint.Desc)" `
@@ -3071,7 +3545,7 @@ function Test-InformationDisclosure {
                 Add-Finding -Category "Information Disclosure" `
                     -CISControl "BB2" `
                     -Finding "Version information disclosed in response" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Version pattern found in response body" `
                     -ExpectedValue "No version disclosure" `
                     -Recommendation "Remove version information from responses" `
@@ -3083,7 +3557,7 @@ function Test-InformationDisclosure {
                 Add-Finding -Category "Information Disclosure" `
                     -CISControl "BB2" `
                     -Finding "Debug/error information exposed" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Stack trace or debug info found" `
                     -ExpectedValue "Generic error messages only" `
                     -Recommendation "Disable detailed error messages in production" `
@@ -3091,25 +3565,26 @@ function Test-InformationDisclosure {
             }
         }
         catch {
-            # Check error response for info disclosure
-            $errorResponse = $_.Exception.Response
-            if ($errorResponse) {
+            # Check error response for info disclosure (PS7 compatible)
+            $errorBody = $_.ErrorDetails.Message
+            if (-not $errorBody -and $_.Exception.Response) {
                 try {
-                    $reader = New-Object System.IO.StreamReader($errorResponse.GetResponseStream())
-                    $errorBody = $reader.ReadToEnd()
-
-                    if ($errorBody -match "Exception|StackTrace|System\.|Microsoft\." ) {
-                        Add-Finding -Category "Information Disclosure" `
-                            -CISControl "BB2" `
-                            -Finding "Error response contains debug information" `
-                            -Resource $endpoint `
-                            -CurrentValue "Stack trace in error response" `
-                            -ExpectedValue "Generic error messages" `
-                            -Recommendation "Configure custom error pages" `
-                            -Severity "Medium"
+                    if ($_.Exception.Response.Content) {
+                        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
                     }
                 }
                 catch { }
+            }
+
+            if ($errorBody -match "Exception|StackTrace|System\.|Microsoft\." ) {
+                Add-Finding -Category "Information Disclosure" `
+                    -CISControl "BB2" `
+                    -Finding "Error response contains debug information" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "Stack trace in error response" `
+                    -ExpectedValue "Generic error messages" `
+                    -Recommendation "Configure custom error pages" `
+                    -Severity "Medium"
             }
         }
     }
@@ -3164,34 +3639,90 @@ function Test-DefaultCredentials {
         @{ User = "PasswordManager"; Pass = "Cyberark1" }
     )
 
+    # Try multiple authentication endpoints
+    $authEndpoints = @(
+        "/PasswordVault/api/Auth/CyberArk/Logon",
+        "/PasswordVault/api/auth/cyberark/logon",
+        "/PasswordVault/v10/logon"
+    )
+
     foreach ($cred in $defaultCreds) {
-        try {
-            $body = @{
-                username = $cred.User
-                password = $cred.Pass
-            } | ConvertTo-Json
-
-            $response = Invoke-RestMethod -Uri "$PVWA/PasswordVault/api/Auth/CyberArk/Logon" `
-                -Method POST -Body $body -ContentType "application/json" -TimeoutSec 10 -ErrorAction Stop
-
-            # If we get here, authentication succeeded with default creds!
-            Add-Finding -Category "Default Credentials" `
-                -CISControl "BB3" `
-                -Finding "Default credentials accepted" `
-                -Resource "Authentication" `
-                -CurrentValue "User '$($cred.User)' with default password" `
-                -ExpectedValue "No default credentials" `
-                -Recommendation "Immediately change password for $($cred.User)" `
-                -Severity "Critical"
-
-            # Log off immediately
+        foreach ($authEndpoint in $authEndpoints) {
             try {
-                Invoke-RestMethod -Uri "$PVWA/PasswordVault/api/Auth/Logoff" -Method POST -Headers @{Authorization = $response} -ErrorAction SilentlyContinue
+                $body = @{
+                    username = $cred.User
+                    password = $cred.Pass
+                } | ConvertTo-Json
+
+                # Use Invoke-WebRequest to get full response details
+                $response = Invoke-WebRequest -Uri "$PVWA$authEndpoint" `
+                    -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+
+                $responseContent = $response.Content
+                $contentType = $response.Headers['Content-Type']
+
+                # Check if response is HTML (login page catch-all) - this is a FALSE POSITIVE
+                if ($responseContent -match "<!DOCTYPE|<html|<head|<body" -or $contentType -match "text/html") {
+                    Write-AuditLog "Auth endpoint returned HTML page (not API response) - skipping" -Level Debug
+                    continue
+                }
+
+                # Check if response matches baseline (SPA catch-all)
+                if (Test-IsBaselineResponse -ResponseContent $responseContent) {
+                    Write-AuditLog "Auth endpoint returned baseline catch-all page - skipping" -Level Debug
+                    continue
+                }
+
+                # Try to parse as JSON - if it's not valid JSON, it's not a real auth response
+                try {
+                    $jsonResponse = $responseContent | ConvertFrom-Json -ErrorAction Stop
+
+                    # Check for actual authentication token in response
+                    # CyberArk returns the token directly as a string, or in a property
+                    if ($jsonResponse -is [string] -and $jsonResponse.Length -gt 20 -and $jsonResponse -notmatch "<!DOCTYPE|<html") {
+                        # Looks like a real token
+                        Add-Finding -Category "Default Credentials" `
+                            -CISControl "BB3" `
+                            -Finding "Default credentials accepted" `
+                            -Resource "Authentication" `
+                            -CurrentValue "User '$($cred.User)' with default password" `
+                            -ExpectedValue "No default credentials" `
+                            -Recommendation "Immediately change password for $($cred.User)" `
+                            -Severity "Critical"
+
+                        # Log off immediately
+                        try {
+                            Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Auth/Logoff" -Method POST `
+                                -Headers @{Authorization = $jsonResponse} -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+                        }
+                        catch { }
+
+                        break  # Found valid creds, move to next user
+                    }
+                    elseif ($jsonResponse.PSObject.Properties['CyberArkLogonResult'] -or
+                            $jsonResponse.PSObject.Properties['token'] -or
+                            $jsonResponse.PSObject.Properties['access_token']) {
+                        # Token in property
+                        Add-Finding -Category "Default Credentials" `
+                            -CISControl "BB3" `
+                            -Finding "Default credentials accepted" `
+                            -Resource "Authentication" `
+                            -CurrentValue "User '$($cred.User)' with default password" `
+                            -ExpectedValue "No default credentials" `
+                            -Recommendation "Immediately change password for $($cred.User)" `
+                            -Severity "Critical"
+                        break
+                    }
+                }
+                catch {
+                    # Not valid JSON, likely an error page or HTML - not a real auth success
+                    Write-AuditLog "Auth response was not valid JSON - not a real auth success" -Level Debug
+                }
             }
-            catch { }
-        }
-        catch {
-            # Expected - authentication should fail
+            catch {
+                # Expected - authentication should fail (401/403)
+                # This is the CORRECT behavior
+            }
         }
     }
 }
@@ -3209,13 +3740,36 @@ function Test-HTTPMethods {
     foreach ($endpoint in $testEndpoints) {
         foreach ($method in $dangerousMethods) {
             try {
-                $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method $method -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+                # Use -MaximumRedirection 0 to detect redirects (302/301 to login = not a real "method allowed")
+                $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method $method -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction SilentlyContinue
 
-                if ($response.StatusCode -ne 405 -and $response.StatusCode -ne 501) {
+                # These status codes indicate the method is properly blocked or requires auth:
+                # 405 = Method Not Allowed (correct behavior)
+                # 501 = Not Implemented (correct behavior)
+                # 401 = Unauthorized (requires auth - not a vulnerability)
+                # 403 = Forbidden (blocked - correct behavior)
+                # 301/302/303/307/308 = Redirect (usually to login - not a vulnerability)
+                $safeStatusCodes = @(405, 501, 401, 403, 301, 302, 303, 307, 308)
+
+                if ($response.StatusCode -notin $safeStatusCodes) {
+                    $body = $response.Content
+
+                    # Skip if response is catch-all login page (false positive)
+                    if (Test-IsBaselineResponse -ResponseContent $body) {
+                        Write-AuditLog "Skipping HTTP method $method on $endpoint - response is baseline catch-all page" -Level Debug
+                        continue
+                    }
+
+                    # Skip if response is HTML login page
+                    if ($body -match "<!DOCTYPE|<html|<head|<body") {
+                        Write-AuditLog "Skipping HTTP method $method on $endpoint - response is HTML (likely login page)" -Level Debug
+                        continue
+                    }
+
                     Add-Finding -Category "HTTP Methods" `
                         -CISControl "BB4" `
                         -Finding "Potentially dangerous HTTP method allowed" `
-                        -Resource "$endpoint" `
+                        -Resource "$PVWA$endpoint" `
                         -CurrentValue "$method returns HTTP $($response.StatusCode)" `
                         -ExpectedValue "HTTP 405 Method Not Allowed" `
                         -Recommendation "Disable $method method on web server" `
@@ -3223,12 +3777,13 @@ function Test-HTTPMethods {
                 }
             }
             catch {
-                # Check if it's a method not allowed response (expected)
-                if ($_.Exception.Response.StatusCode -ne 405 -and
-                    $_.Exception.Response.StatusCode -ne 501 -and
-                    $_.Exception.Response.StatusCode -ne 401 -and
-                    $_.Exception.Response.StatusCode -ne 403) {
-                    # Unexpected response
+                # Check if it's an expected "blocked" response
+                $errorStatus = $_.Exception.Response.StatusCode.value__
+                $safeStatusCodes = @(405, 501, 401, 403, 301, 302, 303, 307, 308)
+
+                if ($errorStatus -notin $safeStatusCodes) {
+                    # Unexpected response - but don't flag without more evidence
+                    Write-AuditLog "HTTP method $method on $endpoint returned unexpected status: $errorStatus" -Level Debug
                 }
             }
         }
@@ -3257,7 +3812,7 @@ function Test-HTTPMethods {
                 Add-Finding -Category "HTTP Methods" `
                     -CISControl "BB4" `
                     -Finding "TRACE method enabled (XST vulnerability)" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "TRACE returns HTTP 200" `
                     -ExpectedValue "TRACE disabled" `
                     -Recommendation "Disable TRACE method to prevent XST attacks" `
@@ -3307,6 +3862,12 @@ function Test-CookieSecurity {
         # Also check Set-Cookie headers directly
         $setCookieHeaders = $response.Headers["Set-Cookie"]
         if ($setCookieHeaders) {
+            # Build response headers hashtable for PoC
+            $respHeaders = @{}
+            foreach ($header in $response.Headers.Keys) {
+                $respHeaders[$header] = $response.Headers[$header] -join "; "
+            }
+
             foreach ($cookieHeader in $setCookieHeaders) {
                 $issues = @()
 
@@ -3329,7 +3890,13 @@ function Test-CookieSecurity {
                         -CurrentValue ($issues -join ", ") `
                         -ExpectedValue "Secure; HttpOnly; SameSite=Strict" `
                         -Recommendation "Configure secure cookie attributes" `
-                        -Severity "Medium"
+                        -Severity "Medium" `
+                        -RequestMethod "GET" `
+                        -RequestURL "$PVWA/PasswordVault/" `
+                        -RequestHeaders @{ "Host" = ([System.Uri]$PVWA).Host; "User-Agent" = "CyberArk-Security-Audit/1.0" } `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseHeaders $respHeaders `
+                        -ResponseBody "Set-Cookie: $cookieHeader"
                 }
             }
         }
@@ -3446,10 +4013,20 @@ function Test-BackupAndConfigFiles {
 
             if ($response.StatusCode -eq 200) {
                 $body = $response.Content
+                $contentType = $response.Headers['Content-Type']
 
                 # Check for soft 404 responses (pages that return 200 but indicate "not found")
                 if (Test-IsSoft404Response -ResponseContent $body) {
-                    Write-AuditLog "Skipping $($file.Path) - detected soft 404 page" -Level Debug
+                    Write-AuditLog "Skipping $($file.Path) - detected soft 404/login page" -Level Debug
+                    continue
+                }
+
+                # Get file extension for validation
+                $extension = [System.IO.Path]::GetExtension($file.Path)
+
+                # Validate that response is actually the expected file type (not a catch-all HTML page)
+                if (-not (Test-IsValidFileResponse -ResponseContent $body -ContentType $contentType -ExpectedExtension $extension)) {
+                    Write-AuditLog "Skipping $($file.Path) - response is HTML/catch-all page, not actual file" -Level Debug
                     continue
                 }
 
@@ -3460,7 +4037,7 @@ function Test-BackupAndConfigFiles {
                 Add-Finding -Category "Exposed Files" `
                     -CISControl "BB7" `
                     -Finding "Sensitive file accessible" `
-                    -Resource $file.Path `
+                    -Resource "$PVWA$($file.Path)" `
                     -CurrentValue "$($file.Desc) - HTTP 200 ($($body.Length) bytes)" `
                     -ExpectedValue "File not accessible" `
                     -Recommendation "Remove or restrict access to $($file.Desc)" `
@@ -3722,6 +4299,11 @@ function Test-RateLimiting {
 
     # If we got here without 429, rate limiting may not be configured
     if ($successCount -eq $testCount) {
+        $sampleBody = @{
+            username = "ratelimit_test"
+            password = "TestPassword123!"
+        } | ConvertTo-Json
+
         Add-Finding -Category "Rate Limiting" `
             -CISControl "BB10" `
             -Finding "No rate limiting detected on login endpoint" `
@@ -3729,7 +4311,14 @@ function Test-RateLimiting {
             -CurrentValue "$testCount requests without rate limit" `
             -ExpectedValue "Rate limiting after 5-10 attempts" `
             -Recommendation "Implement rate limiting to prevent brute force attacks" `
-            -Severity "High"
+            -Severity "High" `
+            -RequestMethod "POST" `
+            -RequestURL $validEndpoint `
+            -RequestHeaders @{ "Host" = ([System.Uri]$validEndpoint).Host; "Content-Type" = "application/json"; "User-Agent" = "CyberArk-Security-Audit/1.0" } `
+            -RequestBody $sampleBody `
+            -ResponseStatus $endpointStatusCode `
+            -ResponseHeaders @{} `
+            -ResponseBody "Sent $testCount rapid login attempts without receiving HTTP 429 (Too Many Requests)"
     }
 }
 
@@ -3745,12 +4334,25 @@ function Test-KnownVulnerabilities {
     foreach ($endpoint in $ssrfEndpoints) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $body = $response.Content
+
+            # Skip if this is a catch-all login page (false positive)
+            if (Test-IsBaselineResponse -ResponseContent $body) {
+                Write-AuditLog "Skipping SSRF endpoint $endpoint - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
+            # Skip HTML responses (login page, not actual API)
+            if ($body -match "<!DOCTYPE|<html|<head|<body") {
+                Write-AuditLog "Skipping SSRF endpoint $endpoint - response is HTML, not API" -Level Debug
+                continue
+            }
 
             if ($response.StatusCode -ne 404) {
                 Add-Finding -Category "Known Vulnerabilities" `
                     -CISControl "BB11" `
                     -Finding "Potentially vulnerable endpoint accessible" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Endpoint responds (check CVE-2021-31796)" `
                     -ExpectedValue "Endpoint patched or removed" `
                     -Recommendation "Verify CyberArk version and apply security patches" `
@@ -3783,7 +4385,7 @@ function Test-KnownVulnerabilities {
                 Add-Finding -Category "Known Vulnerabilities" `
                     -CISControl "BB11" `
                     -Finding "Legacy API version accessible" `
-                    -Resource $api `
+                    -Resource "$PVWA$api" `
                     -CurrentValue "HTTP 200 ($($body.Length) bytes)" `
                     -ExpectedValue "Disabled or removed" `
                     -Recommendation "Disable legacy API endpoints" `
@@ -4529,20 +5131,44 @@ function Test-HeaderAuthBypass {
         @{ Name = "X-Custom-IP-Authorization"; Value = "127.0.0.1" }
     )
 
+    # First, get baseline response without bypass headers (expected: 401/403 or login page)
+    $baselineResponse = $null
+    try {
+        $baselineResponse = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Users" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+    }
+    catch {
+        # Expected - 401/403 is normal for unauthenticated requests
+        $baselineResponse = $_.Exception.Response
+    }
+
     foreach ($header in $bypassHeaders) {
         try {
             $headers = @{ $header.Name = $header.Value }
             $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/Users" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            if ($response.StatusCode -eq 200) {
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+            # Skip HTML responses (SPA login page)
+            if ($body -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+            # Only flag if response contains actual user data (JSON array of users)
+            # AND the response is different from baseline (indicating bypass worked)
+            if ($response.StatusCode -eq 200 -and $body -match '^\s*\[' -and $body -match '"id"|"username"|"UserName"') {
                 Add-Finding -Category "Blackbox Testing" `
                     -CISControl "BB12" `
-                    -Finding "Potential authentication bypass via header injection" `
-                    -Resource "PVWA Authentication" `
-                    -CurrentValue "Header $($header.Name) accepted" `
-                    -ExpectedValue "Request rejected without valid auth" `
-                    -Recommendation "Ensure proxy headers are not trusted for authentication" `
-                    -Severity "Critical"
+                    -Finding "Authentication bypass via header injection - CONFIRMED" `
+                    -Resource "$PVWA/PasswordVault/api/Users" `
+                    -CurrentValue "Header $($header.Name) bypassed authentication - returned user list" `
+                    -ExpectedValue "Request rejected without valid auth (401/403)" `
+                    -Recommendation "Ensure proxy headers are not trusted for authentication. Validate authentication server-side only." `
+                    -Severity "Critical" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA/PasswordVault/api/Users" `
+                    -RequestHeaders $headers `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
             }
         }
         catch { }
@@ -4563,20 +5189,35 @@ function Test-XSSPatterns {
     foreach ($payload in $xssPayloads) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$($payload.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            # Check if payload is reflected in response
-            if ($response.Content -match "<script>|onerror=|javascript:") {
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+            # Check if our specific payload is reflected in response (not just generic patterns)
+            $payloadReflected = $false
+            if ($payload.Path -match "alert\(1\)" -and $body -match "alert\(1\)") { $payloadReflected = $true }
+            if ($payload.Path -match "onerror=" -and $body -match "onerror=") { $payloadReflected = $true }
+            if ($payload.Path -match "javascript:" -and $body -match "javascript:alert") { $payloadReflected = $true }
+
+            if ($payloadReflected) {
                 Add-Finding -Category "Blackbox Testing" `
                     -CISControl "BB13" `
-                    -Finding "Potential XSS vulnerability detected" `
-                    -Resource $payload.Path `
-                    -CurrentValue "XSS payload reflected in response" `
+                    -Finding "XSS vulnerability detected - payload reflected" `
+                    -Resource "$PVWA$($payload.Path)" `
+                    -CurrentValue "XSS payload '$($payload.Desc)' reflected in response" `
                     -ExpectedValue "Input properly sanitized" `
                     -Recommendation "Apply input validation and output encoding" `
-                    -Severity "High"
+                    -Severity "High" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$($payload.Path)" `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
             }
         }
-        catch { }
+        catch {
+            Write-AuditLog "Error testing XSS on $($payload.Path): $($_.Exception.Message)" -Level Debug
+        }
     }
 }
 
@@ -4610,25 +5251,38 @@ function Test-CVE202442340 {
     foreach ($endpoint in $accessControlEndpoints) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$($endpoint.Path)" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $content = $response.Content
 
-            if ($response.StatusCode -eq 200 -and $response.Content) {
-                # Check if response contains access control flags that could be manipulated
-                $content = $response.Content
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $content) { continue }
+
+            # Skip HTML responses (not API data)
+            if ($content -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+            if ($response.StatusCode -eq 200 -and $content) {
+                # Verify it's actually JSON
+                if ($content -notmatch '^\s*[\{\[]') { continue }
 
                 # Look for boolean access control patterns in JSON responses
                 if ($content -match '"(isAdmin|IsAdmin|canManage|CanManage|hasAccess|HasAccess|isAuthorized|enabled|adminRights|superUser)"\s*:\s*(true|false)') {
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE5" `
                         -Finding "CVE-2024-42340: Client-side access control flags detected" `
-                        -Resource $endpoint.Path `
+                        -Resource "$PVWA$($endpoint.Path)" `
                         -CurrentValue "Response contains manipulable access flags: $($Matches[0])" `
                         -ExpectedValue "Access controls enforced server-side only" `
                         -Recommendation "Ensure all access control decisions are enforced server-side. Do not trust client-side flags. Apply CyberArk patches for CVE-2024-42340." `
-                        -Severity "High"
+                        -Severity "High" `
+                        -RequestMethod "GET" `
+                        -RequestURL "$PVWA$($endpoint.Path)" `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)))
                 }
             }
         }
-        catch { }
+        catch {
+            Write-AuditLog "Error testing CVE-2024-42340 on $($endpoint.Path): $($_.Exception.Message)" -Level Debug
+        }
     }
 
     # Additional check: Test if modifying response affects subsequent requests
@@ -4679,25 +5333,39 @@ function Test-CVE202442339 {
             $testPath = $endpoint.Path -replace '\{id\}', $testId
             try {
                 $response = Invoke-WebRequest -Uri "$PVWA$testPath" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $content = $response.Content
 
-                if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 50) {
-                    $content = $response.Content
+                # Skip false positives: baseline/catch-all responses
+                if (Test-IsBaselineResponse -ResponseContent $content) { continue }
+
+                # Skip HTML responses (not API data)
+                if ($content -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+                if ($response.StatusCode -eq 200 -and $content.Length -gt 50) {
+                    # Verify it's actually JSON
+                    if ($content -notmatch '^\s*[\{\[]') { continue }
 
                     # Check if we got actual user/resource data (not an error)
                     if ($content -match '"(username|userName|UserName|email|Email|displayName|DisplayName|rules|Rules|configuration|Configuration)"') {
                         Add-Finding -Category "CVE Assessment" `
                             -CISControl "CVE6" `
-                            -Finding "CVE-2024-42339: Potential IDOR - Resource accessible via ID manipulation" `
-                            -Resource $testPath `
+                            -Finding "CVE-2024-42339: IDOR - Resource accessible via ID manipulation" `
+                            -Resource "$PVWA$testPath" `
                             -CurrentValue "Endpoint returns data for ID: $testId without proper authorization check" `
                             -ExpectedValue "Strict authorization: users can only access their own resources" `
                             -Recommendation "Implement proper authorization checks. Verify user has permission to access requested resource. Apply CyberArk patches for CVE-2024-42339." `
-                            -Severity "High"
+                            -Severity "High" `
+                            -RequestMethod "GET" `
+                            -RequestURL "$PVWA$testPath" `
+                            -ResponseStatus $response.StatusCode `
+                            -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)))
                         break  # Found vulnerability, move to next endpoint
                     }
                 }
             }
-            catch { }
+            catch {
+                Write-AuditLog "Error testing IDOR on $testPath : $($_.Exception.Message)" -Level Debug
+            }
         }
     }
 
@@ -4713,19 +5381,32 @@ function Test-CVE202442339 {
     foreach ($endpoint in $searchEndpoints) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $content = $response.Content
 
-            if ($response.StatusCode -eq 200 -and $response.Content -match '"users"|"Users"|"totalCount"') {
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $content) { continue }
+
+            # Skip HTML responses (not API data)
+            if ($content -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+            # Verify it's actually JSON with user data
+            if ($response.StatusCode -eq 200 -and $content -match '^\s*[\{\[]' -and $content -match '"users"|"Users"|"totalCount"') {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE6" `
                     -Finding "User enumeration endpoint accessible (related to CVE-2024-42338/42339)" `
-                    -Resource $endpoint `
-                    -CurrentValue "User list accessible" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "User list accessible without proper authorization" `
                     -ExpectedValue "User enumeration restricted" `
                     -Recommendation "Restrict user enumeration to authorized administrators only" `
-                    -Severity "Medium"
+                    -Severity "Medium" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -ResponseStatus $response.StatusCode
             }
         }
-        catch { }
+        catch {
+            Write-AuditLog "Error testing user enumeration on $endpoint : $($_.Exception.Message)" -Level Debug
+        }
     }
 }
 
@@ -4744,19 +5425,33 @@ function Test-AdditionalCVEs {
     foreach ($payload in $pathTraversalPayloads) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $content = $response.Content
 
-            if ($response.Content -match "root:|nobody:|daemon:") {
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $content) { continue }
+
+            # Skip HTML responses
+            if ($content -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+            # Check for actual /etc/passwd content (Unix) or win.ini content (Windows)
+            if ($content -match "root:|nobody:|daemon:|bin:|sys:" -or $content -match "\[fonts\]|\[extensions\]|\[mci extensions\]") {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "BB11" `
-                    -Finding "Path traversal vulnerability detected" `
-                    -Resource $payload `
-                    -CurrentValue "File content disclosed" `
+                    -Finding "Path traversal vulnerability - CONFIRMED" `
+                    -Resource "$PVWA$payload" `
+                    -CurrentValue "System file content disclosed" `
                     -ExpectedValue "Path traversal blocked" `
-                    -Recommendation "Apply security patches and input validation" `
-                    -Severity "Critical"
+                    -Recommendation "Apply security patches and input validation immediately" `
+                    -Severity "Critical" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$payload" `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($content.Substring(0, [Math]::Min(500, $content.Length)))
             }
         }
-        catch { }
+        catch {
+            Write-AuditLog "Error testing path traversal with $payload : $($_.Exception.Message)" -Level Debug
+        }
     }
 
     # Third-Party: CVE-2021-44228 (Log4Shell) - Check if Java components exist
@@ -4771,7 +5466,7 @@ function Test-AdditionalCVEs {
         Add-Finding -Category "Third-Party Vulnerabilities" `
             -CISControl "TP3" `
             -Finding "Log4Shell payload sent (manual verification needed)" `
-            -Resource "PVWA API" `
+            -Resource "$PVWA/PasswordVault/api/auth" `
             -CurrentValue "Test payload injected - verify no callback received" `
             -ExpectedValue "No Log4j vulnerability" `
             -Recommendation "Ensure all Java components are patched for CVE-2021-44228 (Log4Shell)" `
@@ -4807,30 +5502,55 @@ function Test-AdditionalCVEs {
 
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
+            $body = $response.Content
+
+            # First check for false positives - if it's a login page or baseline response, skip
+            if (Test-IsSoft404Response -ResponseContent $body) {
+                Write-AuditLog "Skipping $endpoint - detected soft 404/login page" -Level Debug
+                continue
+            }
+            if (Test-IsBaselineResponse -ResponseContent $body) {
+                Write-AuditLog "Skipping $endpoint - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
             # Check if endpoint accepts and processes serialized auth tokens
             # Vulnerable versions will attempt to deserialize; patched versions reject
-            if ($response.StatusCode -eq 200 -or $response.Content -match "SerializationException|TypeConfuseDelegate|BinaryFormatter") {
+            # Must be actual API response (JSON/XML), not HTML
+            $isHtml = $body -match "<!DOCTYPE|<html|<head|<body"
+
+            # Only flag if body contains specific deserialization error indicators
+            # A simple 200 response is NOT enough - it must show evidence of deserializing our payload
+            if (-not $isHtml -and $body -match "SerializationException|TypeConfuseDelegate|BinaryFormatter|ObjectDisposedException|InvalidCastException.*gadget") {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE17" `
-                    -Finding "CVE-2018-9843: Potential deserialization RCE vulnerability" `
-                    -Resource $endpoint `
-                    -CurrentValue "Endpoint accepts serialized auth tokens" `
+                    -Finding "CVE-2018-9843: Deserialization RCE vulnerability - CONFIRMED" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "Endpoint attempts to deserialize untrusted tokens" `
                     -ExpectedValue "Serialized tokens rejected, modern auth only" `
                     -Recommendation "CRITICAL: Upgrade PVWA to 9.9.5+, 9.10+, or 10.2+. This is a pre-auth RCE vulnerability!" `
-                    -Severity "Critical"
+                    -Severity "Critical" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -RequestHeaders $headers `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
             }
         }
         catch {
-            # Check error message for deserialization indicators
-            if ($_.Exception.Message -match "SerializationException|deserialize|BinaryFormatter") {
+            # Check error message for deserialization indicators - must be specific
+            if ($_.Exception.Message -match "SerializationException|BinaryFormatter|TypeConfuseDelegate") {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE17" `
                     -Finding "CVE-2018-9843: Deserialization endpoint detected" `
-                    -Resource $endpoint `
-                    -CurrentValue "Endpoint attempts to deserialize tokens" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "Endpoint attempts to deserialize tokens - error: $($_.Exception.Message)" `
                     -ExpectedValue "No deserialization of untrusted data" `
                     -Recommendation "Upgrade PVWA immediately - pre-auth RCE possible" `
                     -Severity "Critical"
+            }
+            else {
+                Write-AuditLog "Error testing CVE-2018-9843 on $endpoint : $($_.Exception.Message)" -Level Debug
             }
         }
     }
@@ -4866,30 +5586,43 @@ function Test-AdditionalCVEs {
     foreach ($endpoint in $samlEndpoints) {
         try {
             # Test POST with SAMLResponse parameter
-            $body = "SAMLResponse=$([System.Web.HttpUtility]::UrlEncode($xxeBase64))"
+            $postBody = "SAMLResponse=$([System.Web.HttpUtility]::UrlEncode($xxeBase64))"
 
-            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method POST -Body $postBody -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $responseBody = $response.Content
+
+            # Skip false positives: baseline/catch-all responses (SPA login page)
+            if (Test-IsBaselineResponse -ResponseContent $responseBody) { continue }
+
+            # Skip generic HTML responses (not a real SAML endpoint)
+            if ($responseBody -match "<!DOCTYPE|<html|<head|<body" -and $responseBody -notmatch "SAMLResponse|SAML|saml") { continue }
 
             # Check if XXE was processed (file content or error indicating entity processing)
-            if ($response.Content -match "\[fonts\]|\[extensions\]|win\.ini|XXE|DOCTYPE|ENTITY") {
+            if ($responseBody -match "\[fonts\]|\[extensions\]|win\.ini") {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE18" `
-                    -Finding "CVE-2019-7442: XXE vulnerability in SAML endpoint" `
-                    -Resource $endpoint `
-                    -CurrentValue "SAML endpoint processes external XML entities" `
+                    -Finding "CVE-2019-7442: XXE vulnerability in SAML endpoint - CONFIRMED" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "SAML endpoint processes external XML entities - win.ini content leaked" `
                     -ExpectedValue "External entities disabled in XML parser" `
                     -Recommendation "Upgrade to CyberArk version > 10.7. Disable external entity processing in XML parsers." `
-                    -Severity "High"
+                    -Severity "High" `
+                    -RequestMethod "POST" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($responseBody.Substring(0, [Math]::Min(500, $responseBody.Length)))
             }
-            elseif ($response.StatusCode -eq 200) {
-                # Endpoint exists and accepts SAML - worth noting
+            # Check for SAML-specific error responses (indicates real SAML endpoint)
+            elseif ($responseBody -match "SAML|SAMLRequest|SAMLResponse|urn:oasis:names:tc:SAML" -or
+                    $responseBody -match "InvalidSignature|MalformedAssertion|AuthnFailed") {
+                # Real SAML endpoint detected - flag for version verification
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE18" `
                     -Finding "SAML authentication endpoint detected (CVE-2019-7442 target)" `
-                    -Resource $endpoint `
-                    -CurrentValue "SAML endpoint accessible - verify version > 10.7" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "SAML endpoint responding with SAML-specific errors - verify version > 10.7" `
                     -ExpectedValue "Patched against XXE or SAML disabled if unused" `
-                    -Recommendation "Verify CyberArk version is patched against CVE-2019-7442" `
+                    -Recommendation "Verify CyberArk version is patched against CVE-2019-7442. If SAML is not used, disable the endpoint." `
                     -Severity "Medium"
             }
         }
@@ -4981,12 +5714,21 @@ function Test-CVE2025EPM {
             $testEndpoints = @("/EPMUI/", "/EPMUI/Login.aspx", "/EPMUI/Default.aspx")
             foreach ($ep in $testEndpoints) {
                 $response = Invoke-WebRequest -Uri "$epmBase$ep" -Method GET -Headers $spoofHeaders -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
-                if ($response.StatusCode -eq 200) {
+                $body = $response.Content
+
+                # Skip false positives: baseline/catch-all responses (SPA login page)
+                if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+                # Skip if response is generic HTML (not EPM-specific)
+                if ($body -match "<!DOCTYPE|<html" -and $body -notmatch "EPMUI|EPM|Endpoint Privilege|CyberArk EPM") { continue }
+
+                # Only flag if response contains EPM-specific content
+                if ($response.StatusCode -eq 200 -and ($body -match "EPMUI|EPM|Endpoint Privilege|VfManager")) {
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE8" `
                         -Finding "CVE-2025-22271: EPM endpoint accepts X-Forwarded-For headers" `
                         -Resource "$epmBase$ep" `
-                        -CurrentValue "Endpoint accessible with spoofed headers - audit logs may record spoofed IPs" `
+                        -CurrentValue "EPM endpoint accessible with spoofed headers - audit logs may record spoofed IPs" `
                         -ExpectedValue "X-Forwarded-For headers validated against trusted proxies only" `
                         -Recommendation "Configure EPM to only trust X-Forwarded-For from known reverse proxies. Apply patches for CVE-2025-22271." `
                         -Severity "Medium"
@@ -5011,20 +5753,34 @@ function Test-CVE2025EPM {
             try {
                 # Use POST as per advisory
                 $response = Invoke-WebRequest -Uri "$epmBase$xssTestEndpoint" -Method POST -Body $payload -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $body = $response.Content
 
-                if ($response.Content -match "<script>|onerror=|onload=" -and $response.Content -notmatch "Content-Security-Policy") {
+                # Skip false positives: baseline/catch-all responses
+                if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+                # Skip if response is generic HTML (not EPM-specific)
+                if ($body -match "<!DOCTYPE|<html" -and $body -notmatch "EPMUI|EPM|ModalDlg") { continue }
+
+                # Check if our specific XSS payload is reflected (not just generic patterns)
+                if ($body -match "CVE-2025-22272|alert\(1\)|onerror=alert|onload=alert" -and $body -notmatch "Content-Security-Policy") {
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE9" `
-                        -Finding "CVE-2025-22272: XSS vulnerability via modalDlgMsgInternal" `
+                        -Finding "CVE-2025-22272: XSS vulnerability via modalDlgMsgInternal - CONFIRMED" `
                         -Resource "$epmBase$xssTestEndpoint" `
                         -CurrentValue "XSS payload reflected in response (POST method)" `
                         -ExpectedValue "Input sanitized, CSP headers present" `
                         -Recommendation "Apply CyberArk security patch for CVE-2025-22272. Implement Content-Security-Policy." `
-                        -Severity "High"
+                        -Severity "High" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$epmBase$xssTestEndpoint" `
+                        -ResponseStatus $response.StatusCode `
+                        -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
                     break
                 }
             }
-            catch { }
+            catch {
+                Write-AuditLog "Error testing CVE-2025-22272 on $epmBase$xssTestEndpoint : $($_.Exception.Message)" -Level Debug
+            }
         }
 
         # CVE-2025-22273 - Password change brute force (no rate limiting)
@@ -5039,6 +5795,17 @@ function Test-CVE2025EPM {
 
         foreach ($endpoint in $changePasswordEndpoints) {
             try {
+                # First, verify the endpoint exists and is EPM-specific (not a catch-all response)
+                $probeResponse = Invoke-WebRequest -Uri "$epmBase$endpoint" -Method POST -Body '{}' -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+                $probeBody = $probeResponse.Content
+
+                # Skip if response is baseline/catch-all (EPM doesn't exist)
+                if (Test-IsBaselineResponse -ResponseContent $probeBody) { continue }
+
+                # Skip if response is generic HTML (not EPM-specific)
+                if ($probeBody -match "<!DOCTYPE|<html" -and $probeBody -notmatch "EPMUI|EPM|VfManager|ChangePassword") { continue }
+
+                # EPM endpoint exists - now test for rate limiting
                 $testRequests = @()
                 $testBody = '{"oldPassword":"test123","newPassword":"test456"}'
 
@@ -5082,20 +5849,33 @@ function Test-CVE2025EPM {
         foreach ($ep in $appDefEndpoints) {
             try {
                 $response = Invoke-WebRequest -Uri "$epmBase$($ep.Path)" -Method POST -Body $ep.Body -ContentType $ep.ContentType -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $body = $response.Content
 
-                if ($response.Content -match "<h1>|<script>|CVE-2025-22274") {
+                # Skip false positives: baseline/catch-all responses
+                if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+                # Skip if response is generic HTML (not EPM-specific)
+                if ($body -match "<!DOCTYPE|<html" -and $body -notmatch "EPMUI|EPM|Application") { continue }
+
+                # Check if our specific payload is reflected
+                if ($body -match "CVE-2025-22274-TEST|injected|<script>alert\(1\)</script>") {
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE11" `
-                        -Finding "CVE-2025-22274: HTML injection in Application definition" `
+                        -Finding "CVE-2025-22274: HTML injection in Application definition - CONFIRMED" `
                         -Resource "$epmBase$($ep.Path)" `
                         -CurrentValue "HTML content accepted in application definition" `
                         -ExpectedValue "HTML properly escaped or rejected" `
                         -Recommendation "Apply input validation and output encoding. Patch for CVE-2025-22274." `
-                        -Severity "Medium"
+                        -Severity "Medium" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$epmBase$($ep.Path)" `
+                        -ResponseStatus $response.StatusCode
                     break
                 }
             }
-            catch { }
+            catch {
+                Write-AuditLog "Error testing CVE-2025-22274 on $epmBase$($ep.Path) : $($_.Exception.Message)" -Level Debug
+            }
         }
 
         # CVE-2025-22270 - XSS in Role Management (name field)
@@ -5110,20 +5890,33 @@ function Test-CVE2025EPM {
         foreach ($ep in $roleEndpoints) {
             try {
                 $response = Invoke-WebRequest -Uri "$epmBase$($ep.Path)" -Method POST -Body $ep.Body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $body = $response.Content
 
-                if ($response.Content -match "<script>|onerror=") {
+                # Skip false positives: baseline/catch-all responses
+                if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+                # Skip if response is generic HTML (not EPM-specific)
+                if ($body -match "<!DOCTYPE|<html" -and $body -notmatch "EPMUI|EPM|Role") { continue }
+
+                # Check if our specific payload is reflected
+                if ($body -match "<script>alert\(1\)</script>|onerror=alert\(1\)") {
                     Add-Finding -Category "CVE Assessment" `
                         -CISControl "CVE7" `
-                        -Finding "CVE-2025-22270: XSS in Role Management name field" `
+                        -Finding "CVE-2025-22270: XSS in Role Management name field - CONFIRMED" `
                         -Resource "$epmBase$($ep.Path)" `
                         -CurrentValue "Script content accepted in role name" `
                         -ExpectedValue "Input sanitized, HTML encoded" `
                         -Recommendation "Apply patches for CVE-2025-22270. Note: requires CSP bypass for full exploitation." `
-                        -Severity "Medium"
+                        -Severity "Medium" `
+                        -RequestMethod "POST" `
+                        -RequestURL "$epmBase$($ep.Path)" `
+                        -ResponseStatus $response.StatusCode
                     break
                 }
             }
-            catch { }
+            catch {
+                Write-AuditLog "Error testing CVE-2025-22270 on $epmBase$($ep.Path) : $($_.Exception.Message)" -Level Debug
+            }
         }
     }
 }
@@ -5156,13 +5949,22 @@ function Test-CVE2025SecretsManager {
                 foreach ($endpoint in $iamEndpoints) {
                     try {
                         $response = Invoke-WebRequest -Uri "https://${pvwaHost}:${port}$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+                        $body = $response.Content
 
-                        if ($response.StatusCode -eq 200) {
+                        # Skip false positives: baseline/catch-all responses
+                        if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+                        # Skip HTML responses (not Conjur/Secrets Manager API)
+                        if ($body -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+                        # Only flag if response contains authenticator-specific content (JSON API response)
+                        if ($response.StatusCode -eq 200 -and $body -match '^\s*\{' -and
+                            ($body -match '"authenticator"|"authn"|"account"|"conjur"')) {
                             Add-Finding -Category "CVE Assessment" `
                                 -CISControl "CVE12" `
                                 -Finding "Secrets Manager authenticator endpoint accessible (CVE-2025-49827 risk)" `
                                 -Resource "https://${pvwaHost}:${port}$endpoint" `
-                                -CurrentValue "Endpoint responds - verify IAM configuration is secure" `
+                                -CurrentValue "Authenticator endpoint responds with API data - verify IAM configuration is secure" `
                                 -ExpectedValue "Authenticators properly configured and secured" `
                                 -Recommendation "Review IAM authenticator configuration and apply patches for CVE-2025-49827" `
                                 -Severity "High"
@@ -5235,7 +6037,7 @@ function Test-CVE2025SecretsManager {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CVE14" `
                     -Finding "Internal endpoint accessible from external network (CVE-2025-49831 risk)" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Endpoint accessible: $($body.Substring(0, [Math]::Min(100, $body.Length)))..." `
                     -ExpectedValue "Internal endpoints not accessible externally" `
                     -Recommendation "Review network segmentation and apply CVE-2025-49831 patches" `
@@ -5612,7 +6414,7 @@ function Test-UsernameEnumeration {
                         Add-Finding -Category "Authentication Security" `
                             -CISControl "AUTH1" `
                             -Finding "Username enumeration via X-CFY-TX-TM header" `
-                            -Resource $endpoint `
+                            -Resource "$PVWA$endpoint" `
                             -CurrentValue "X-CFY-TX-TM: $txTmValue for user '$($testUser.User)'" `
                             -ExpectedValue "Consistent response times regardless of user existence" `
                             -Recommendation "Upgrade CyberArk Identity to version > 22.1. Implement consistent response times." `
@@ -5630,7 +6432,7 @@ function Test-UsernameEnumeration {
                         Add-Finding -Category "Authentication Security" `
                             -CISControl "AUTH1" `
                             -Finding "Username enumeration via response length difference" `
-                            -Resource $endpoint `
+                            -Resource "$PVWA$endpoint" `
                             -CurrentValue "Response length differs by $([Math]::Abs($existingUserLen - $nonExistingUserLen)) bytes" `
                             -ExpectedValue "Consistent response lengths" `
                             -Recommendation "Normalize response lengths for valid/invalid users" `
@@ -5710,7 +6512,7 @@ function Test-SecurityHeaders {
                             Add-Finding -Category "Security Headers" `
                                 -CISControl "HDR1" `
                                 -Finding "Missing security header: $missing" `
-                                -Resource $endpoint `
+                                -Resource "$PVWA$endpoint" `
                                 -CurrentValue "Header not present" `
                                 -ExpectedValue "$missing header configured" `
                                 -Recommendation $headerInfo.Recommendation `
@@ -5723,7 +6525,7 @@ function Test-SecurityHeaders {
                         Add-Finding -Category "Security Headers" `
                             -CISControl "HDR1" `
                             -Finding "Multiple security headers missing ($($missingHeaders.Count) headers)" `
-                            -Resource $endpoint `
+                            -Resource "$PVWA$endpoint" `
                             -CurrentValue "Missing: $($missingHeaders -join ', ')" `
                             -ExpectedValue "All security headers configured" `
                             -Recommendation "Review OWASP Secure Headers guidelines" `
@@ -5738,7 +6540,7 @@ function Test-SecurityHeaders {
                         Add-Finding -Category "Information Disclosure" `
                             -CISControl "HDR2" `
                             -Finding "Server version disclosed in header" `
-                            -Resource $endpoint `
+                            -Resource "$PVWA$endpoint" `
                             -CurrentValue "Server: $serverHeader" `
                             -ExpectedValue "Server header removed or generic" `
                             -Recommendation "Remove or obfuscate Server header" `
@@ -5750,7 +6552,7 @@ function Test-SecurityHeaders {
                     Add-Finding -Category "Information Disclosure" `
                         -CISControl "HDR2" `
                         -Finding "X-Powered-By header discloses technology" `
-                        -Resource $endpoint `
+                        -Resource "$PVWA$endpoint" `
                         -CurrentValue "X-Powered-By: $($response.Headers["X-Powered-By"])" `
                         -ExpectedValue "Header removed" `
                         -Recommendation "Remove X-Powered-By header in IIS" `
@@ -5761,7 +6563,7 @@ function Test-SecurityHeaders {
                     Add-Finding -Category "Information Disclosure" `
                         -CISControl "HDR2" `
                         -Finding "ASP.NET version disclosed" `
-                            -Resource $endpoint `
+                        -Resource "$PVWA$endpoint" `
                         -CurrentValue "X-AspNet-Version: $($response.Headers["X-AspNet-Version"])" `
                         -ExpectedValue "Header removed" `
                         -Recommendation "Disable X-AspNet-Version in web.config" `
@@ -5795,7 +6597,7 @@ function Test-IISHardening {
                 Add-Finding -Category "IIS Hardening" `
                     -CISControl "IIS1" `
                     -Finding "Dangerous HTTP method enabled: $method" `
-                    -Resource "/PasswordVault/" `
+                    -Resource "$PVWA/PasswordVault/" `
                     -CurrentValue "Method $method returns $($response.StatusCode)" `
                     -ExpectedValue "Method returns 405 Not Allowed" `
                     -Recommendation "Disable $method method in IIS. For WebDAV methods, remove WebDAV role." `
@@ -5819,7 +6621,7 @@ function Test-IISHardening {
                 Add-Finding -Category "IIS Hardening" `
                     -CISControl "IIS1" `
                     -Finding "OPTIONS reveals dangerous methods" `
-                    -Resource "/PasswordVault/" `
+                    -Resource "$PVWA/PasswordVault/" `
                     -CurrentValue "Allow: $allowedMethods" `
                     -ExpectedValue "Only GET, POST, HEAD allowed" `
                     -Recommendation "Disable unnecessary HTTP methods" `
@@ -5845,7 +6647,7 @@ function Test-IISHardening {
                 Add-Finding -Category "IIS Hardening" `
                     -CISControl "IIS2" `
                     -Finding "Directory listing enabled" `
-                    -Resource $dir `
+                    -Resource "$PVWA$dir" `
                     -CurrentValue "Directory contents visible" `
                     -ExpectedValue "Directory browsing disabled" `
                     -Recommendation "Disable directory browsing in IIS" `
@@ -5865,25 +6667,31 @@ function Test-IISHardening {
 
     foreach ($trigger in $errorTriggers) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         }
         catch {
-            $errorContent = $_.Exception.Response
-            if ($errorContent) {
-                $reader = New-Object System.IO.StreamReader($errorContent.GetResponseStream())
-                $errorBody = $reader.ReadToEnd()
-
-                if ($errorBody -match "Stack Trace:|Exception Details:|Server Error in|Source Error:|at System\.|NullReferenceException|SqlException|OracleException") {
-                    Add-Finding -Category "IIS Hardening" `
-                        -CISControl "IIS3" `
-                        -Finding "Detailed error messages exposed" `
-                        -Resource $trigger `
-                        -CurrentValue "Stack trace or exception details visible" `
-                        -ExpectedValue "Generic error page only" `
-                        -Recommendation "Set customErrors mode='On' in web.config" `
-                        -Severity "Medium"
-                    break
+            # In PowerShell 7, access error details differently
+            $errorBody = $_.ErrorDetails.Message
+            if (-not $errorBody -and $_.Exception.Response) {
+                try {
+                    # Try to read from response content for PS7
+                    if ($_.Exception.Response.Content) {
+                        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
+                    }
                 }
+                catch { }
+            }
+
+            if ($errorBody -match "Stack Trace:|Exception Details:|Server Error in|Source Error:|at System\.|NullReferenceException|SqlException|OracleException") {
+                Add-Finding -Category "IIS Hardening" `
+                    -CISControl "IIS3" `
+                    -Finding "Detailed error messages exposed" `
+                    -Resource "$PVWA$trigger" `
+                    -CurrentValue "Stack trace or exception details visible" `
+                    -ExpectedValue "Generic error page only" `
+                    -Recommendation "Set customErrors mode='On' in web.config" `
+                    -Severity "Medium"
+                break
             }
         }
     }
@@ -5919,20 +6727,36 @@ function Test-APISecurityIssues {
     foreach ($endpoint in $apiDocEndpoints) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            if ($response.StatusCode -eq 200 -and $response.Content -match "swagger|openapi|paths|endpoints|api-docs") {
+            # Skip false positives: baseline/catch-all responses
+            if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+            # Must be actual API doc content (JSON/YAML/HTML with swagger), not generic HTML
+            $isApiDoc = ($body -match '"swagger"|"openapi"|"paths":\s*\{|"info":\s*\{' -or
+                        $body -match 'swagger-ui|Swagger UI|api-docs')
+
+            # Skip if it's just generic HTML with word "swagger" somewhere
+            if ($body -match "<!DOCTYPE|<html" -and -not ($body -match 'swagger-ui|SwaggerUI')) { continue }
+
+            if ($response.StatusCode -eq 200 -and $isApiDoc) {
                 Add-Finding -Category "API Security" `
                     -CISControl "API6" `
                     -Finding "API documentation exposed: $endpoint" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Swagger/OpenAPI docs accessible without auth" `
                     -ExpectedValue "API documentation restricted or disabled in production" `
                     -Recommendation "Disable Swagger UI in production or require authentication" `
-                    -Severity "Medium"
+                    -Severity "Medium" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -ResponseStatus $response.StatusCode
                 break
             }
         }
-        catch { }
+        catch {
+            Write-AuditLog "Error testing API docs on $endpoint : $($_.Exception.Message)" -Level Debug
+        }
     }
 
     # Test CORS configuration
@@ -5957,7 +6781,7 @@ function Test-APISecurityIssues {
                 Add-Finding -Category "API Security" `
                     -CISControl "API7" `
                     -Finding "CORS allows any origin (wildcard)" `
-                    -Resource "/PasswordVault/api/" `
+                    -Resource "$PVWA/PasswordVault/api/" `
                     -CurrentValue "Access-Control-Allow-Origin: *" `
                     -ExpectedValue "Specific trusted origins only" `
                     -Recommendation "Configure CORS to allow only trusted origins" `
@@ -5969,7 +6793,7 @@ function Test-APISecurityIssues {
                 Add-Finding -Category "API Security" `
                     -CISControl "API7" `
                     -Finding "CORS reflects arbitrary origin" `
-                    -Resource "/PasswordVault/api/" `
+                    -Resource "$PVWA/PasswordVault/api/" `
                     -CurrentValue "Reflects origin: $origin (Credentials: $acacHeader)" `
                     -ExpectedValue "Only trusted origins allowed" `
                     -Recommendation "Implement strict CORS origin validation" `
@@ -6013,7 +6837,7 @@ function Test-APISecurityIssues {
                 Add-Finding -Category "API Security" `
                     -CISControl "API8" `
                     -Finding "No rate limiting on authentication endpoint" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "10 requests in $([math]::Round($avgTime * 10))ms total, no 429 responses" `
                     -ExpectedValue "Rate limiting (429) after 3-5 failed attempts" `
                     -Recommendation "Implement rate limiting and account lockout on auth endpoints" `
@@ -6036,7 +6860,7 @@ function Test-APISecurityIssues {
                 Add-Finding -Category "API Security" `
                     -CISControl "API6" `
                     -Finding "GraphQL introspection enabled" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Schema introspection allowed" `
                     -ExpectedValue "Introspection disabled in production" `
                     -Recommendation "Disable GraphQL introspection in production" `
@@ -6071,16 +6895,30 @@ function Test-AuthenticationWeaknesses {
             }
 
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            if ($response.StatusCode -eq 200) {
+            # Skip false positives: baseline/catch-all responses (SPA login page)
+            if (Test-IsBaselineResponse -ResponseContent $body) { continue }
+
+            # Skip HTML responses (not API data)
+            if ($body -match "<!DOCTYPE|<html|<head|<body") { continue }
+
+            # Only flag if response contains actual authenticated data (JSON with user/token info)
+            if ($response.StatusCode -eq 200 -and $body -match '^\s*\{' -and
+                ($body -match '"token"|"access_token"|"user"|"username"|"CyberArkLogonResult"')) {
                 Add-Finding -Category "Authentication Security" `
                     -CISControl "AUTH2" `
-                    -Finding "JWT 'none' algorithm accepted" `
-                    -Resource $endpoint `
-                    -CurrentValue "Unsigned JWT tokens accepted" `
+                    -Finding "JWT 'none' algorithm accepted - CONFIRMED" `
+                    -Resource "$PVWA$endpoint" `
+                    -CurrentValue "Unsigned JWT token accepted and returned authenticated response" `
                     -ExpectedValue "Only signed tokens with strong algorithms accepted" `
                     -Recommendation "Reject JWT tokens with 'none' algorithm. Use RS256 or ES256." `
-                    -Severity "Critical"
+                    -Severity "Critical" `
+                    -RequestMethod "GET" `
+                    -RequestURL "$PVWA$endpoint" `
+                    -RequestHeaders $headers `
+                    -ResponseStatus $response.StatusCode `
+                    -ResponseBody ($body.Substring(0, [Math]::Min(500, $body.Length)))
             }
         }
         catch { }
@@ -6105,7 +6943,7 @@ function Test-AuthenticationWeaknesses {
                     Add-Finding -Category "Session Security" `
                         -CISControl "AUTH3" `
                         -Finding "Cookie '$($cookie.Name)' missing security flags" `
-                        -Resource "/PasswordVault/" `
+                        -Resource "$PVWA/PasswordVault/" `
                         -CurrentValue $($issues -join ", ") `
                         -ExpectedValue "Secure; HttpOnly; SameSite=Strict" `
                         -Recommendation "Set Secure, HttpOnly, and SameSite flags on all cookies" `
@@ -6139,7 +6977,7 @@ function Test-AuthenticationWeaknesses {
                 Add-Finding -Category "Session Security" `
                     -CISControl "AUTH4" `
                     -Finding "Potential session fixation vulnerability" `
-                    -Resource "/PasswordVault/" `
+                    -Resource "$PVWA/PasswordVault/" `
                     -CurrentValue "Session ID not rotated after authentication attempt" `
                     -ExpectedValue "New session ID issued after login" `
                     -Recommendation "Regenerate session ID after successful authentication" `
@@ -6224,11 +7062,29 @@ function Test-InformationDisclosure {
             $response = Invoke-WebRequest -Uri "$PVWA$file" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) {
+                $body = $response.Content
+                $contentType = $response.Headers['Content-Type']
+
+                # Check for soft 404/login page responses first
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $file - detected soft 404/login page" -Level Debug
+                    continue
+                }
+
+                # Get file extension for validation
+                $extension = [System.IO.Path]::GetExtension($file)
+
+                # Validate that response is actually the expected file type
+                if (-not (Test-IsValidFileResponse -ResponseContent $body -ContentType $contentType -ExpectedExtension $extension)) {
+                    Write-AuditLog "Skipping $file - response is HTML/catch-all page, not actual file" -Level Debug
+                    continue
+                }
+
                 $isSensitive = $false
                 $severity = "Low"
 
                 if ($file -match "\.config|\.env|appsettings|connection") {
-                    $isSensitive = $response.Content -match "connectionString|password|secret|apiKey|token"
+                    $isSensitive = $body -match "connectionString|password|secret|apiKey|token"
                     $severity = "Critical"
                 }
                 elseif ($file -match "\.git|\.svn") {
@@ -6244,8 +7100,8 @@ function Test-InformationDisclosure {
                     Add-Finding -Category "Information Disclosure" `
                         -CISControl "INFO1" `
                         -Finding "Sensitive file accessible: $file" `
-                        -Resource $file `
-                        -CurrentValue "File accessible ($($response.Content.Length) bytes)" `
+                        -Resource "$PVWA$file" `
+                        -CurrentValue "File accessible ($($body.Length) bytes)" `
                         -ExpectedValue "File not accessible (403/404)" `
                         -Recommendation "Remove or restrict access to sensitive files" `
                         -Severity $severity
@@ -6274,7 +7130,7 @@ function Test-InformationDisclosure {
                 Add-Finding -Category "Information Disclosure" `
                     -CISControl "INFO2" `
                     -Finding "CyberArk version disclosed: $version" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Version: $version" `
                     -ExpectedValue "Version information not exposed" `
                     -Recommendation "Remove version information from responses" `
@@ -6293,27 +7149,31 @@ function Test-InformationDisclosure {
 
     foreach ($trigger in $pathTriggers) {
         try {
-            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri "$PVWA$trigger" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         }
         catch {
-            try {
-                $stream = $_.Exception.Response.GetResponseStream()
-                $reader = New-Object System.IO.StreamReader($stream)
-                $errorBody = $reader.ReadToEnd()
-
-                if ($errorBody -match '([A-Z]:\\[^<"\s]+)|(/var/[^<"\s]+)|(/opt/[^<"\s]+)|(/home/[^<"\s]+)') {
-                    Add-Finding -Category "Information Disclosure" `
-                        -CISControl "INFO3" `
-                        -Finding "Internal file path disclosed in error" `
-                        -Resource $trigger `
-                        -CurrentValue "Path exposed: $($Matches[0])" `
-                        -ExpectedValue "Generic error message only" `
-                        -Recommendation "Configure custom error pages without path information" `
-                        -Severity "Medium"
-                    break
+            # PS7 compatible error body access
+            $errorBody = $_.ErrorDetails.Message
+            if (-not $errorBody -and $_.Exception.Response) {
+                try {
+                    if ($_.Exception.Response.Content) {
+                        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
+                    }
                 }
+                catch { }
             }
-            catch { }
+
+            if ($errorBody -match '([A-Z]:\\[^<"\s]+)|(/var/[^<"\s]+)|(/opt/[^<"\s]+)|(/home/[^<"\s]+)') {
+                Add-Finding -Category "Information Disclosure" `
+                    -CISControl "INFO3" `
+                    -Finding "Internal file path disclosed in error" `
+                    -Resource "$PVWA$trigger" `
+                    -CurrentValue "Path exposed: $($Matches[0])" `
+                    -ExpectedValue "Generic error message only" `
+                    -Recommendation "Configure custom error pages without path information" `
+                    -Severity "Medium"
+                break
+            }
         }
     }
 }
@@ -6335,20 +7195,20 @@ function Test-NetworkProtocolIssues {
         "$([System.Uri]$PVWA).Host.evil.com"
     )
 
-    foreach ($host in $maliciousHosts) {
+    foreach ($testHost in $maliciousHosts) {
         try {
             $headers = @{
-                "Host" = $host
+                "Host" = $testHost
             }
 
             $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method GET -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
-            if ($response.Content -match $host -or $response.Headers["Location"] -match $host) {
+            if ($response.Content -match $testHost -or $response.Headers["Location"] -match $testHost) {
                 Add-Finding -Category "Network Security" `
                     -CISControl "NET8" `
                     -Finding "Host header injection vulnerability" `
-                    -Resource "/PasswordVault/" `
-                    -CurrentValue "Injected host '$host' reflected in response" `
+                    -Resource "$PVWA/PasswordVault/" `
+                    -CurrentValue "Injected host '$testHost' reflected in response" `
                     -ExpectedValue "Host header validated against whitelist" `
                     -Recommendation "Validate Host header against allowed hostnames" `
                     -Severity "Medium"
@@ -6377,7 +7237,7 @@ function Test-NetworkProtocolIssues {
                         Add-Finding -Category "Network Security" `
                             -CISControl "NET9" `
                             -Finding "Open redirect vulnerability via '$param' parameter" `
-                            -Resource "/PasswordVault/?$param=" `
+                            -Resource "$PVWA/PasswordVault/?$param=" `
                             -CurrentValue "Redirects to: $location" `
                             -ExpectedValue "Only internal redirects allowed" `
                             -Recommendation "Validate redirect URLs against whitelist" `
@@ -6393,8 +7253,11 @@ function Test-NetworkProtocolIssues {
     # Test HTTP Request Smuggling indicators
     Write-AuditLog "Testing for HTTP Request Smuggling indicators..." -Level Info
 
-    # CL.TE test
+    # CL.TE test - send conflicting Content-Length and Transfer-Encoding headers
     try {
+        # First get baseline response for normal POST
+        $baselinePost = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method POST -Body "test=1" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+
         $smuggleBody = "0`r`n`r`nGET /admin HTTP/1.1`r`nHost: localhost`r`n`r`n"
         $headers = @{
             "Content-Length" = "6"
@@ -6402,20 +7265,32 @@ function Test-NetworkProtocolIssues {
         }
 
         $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/" -Method POST -Headers $headers -Body $smuggleBody -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
+        $body = $response.Content
 
-        # If we get an unexpected response, might indicate smuggling vulnerability
-        if ($response.StatusCode -eq 200 -and $response.Content -match "admin|forbidden|unauthorized") {
+        # Skip false positives: baseline/catch-all responses
+        if (Test-IsBaselineResponse -ResponseContent $body) {
+            Write-AuditLog "HTTP smuggling test returned baseline response - likely not vulnerable" -Level Debug
+        }
+        # Only flag if response is significantly different from baseline AND contains smuggled request artifacts
+        elseif ($response.StatusCode -ne $baselinePost.StatusCode -or
+                ($body -match "HTTP/1\.1|localhost|/admin" -and $body -notmatch "<!DOCTYPE|<html")) {
             Add-Finding -Category "Network Security" `
                 -CISControl "NET10" `
                 -Finding "Potential HTTP Request Smuggling (CL.TE)" `
-                -Resource "/PasswordVault/" `
-                -CurrentValue "Server may be vulnerable to request smuggling" `
+                -Resource "$PVWA/PasswordVault/" `
+                -CurrentValue "Server may process conflicting Content-Length/Transfer-Encoding differently" `
                 -ExpectedValue "Consistent handling of Content-Length and Transfer-Encoding" `
                 -Recommendation "Configure reverse proxy to normalize requests. Reject ambiguous requests." `
-                -Severity "High"
+                -Severity "High" `
+                -RequestMethod "POST" `
+                -RequestURL "$PVWA/PasswordVault/" `
+                -RequestHeaders $headers `
+                -ResponseStatus $response.StatusCode
         }
     }
-    catch { }
+    catch {
+        Write-AuditLog "Error testing HTTP Request Smuggling: $($_.Exception.Message)" -Level Debug
+    }
 
     # Test LDAP Injection in auth
     Write-AuditLog "Testing for LDAP Injection..." -Level Info
@@ -6435,13 +7310,27 @@ function Test-NetworkProtocolIssues {
             } | ConvertTo-Json
 
             $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/auth/logon" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $responseBody = $response.Content
 
-            # Check for LDAP error messages
-            if ($response.Content -match "LDAP|ldap|directory|DN=|distinguished name") {
+            # Skip if response is a catch-all login page (false positive)
+            if (Test-IsBaselineResponse -ResponseContent $responseBody) {
+                Write-AuditLog "Skipping LDAP injection auth test - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
+            # Skip HTML responses (login page redirect, not real API response)
+            $isHtml = $responseBody -match "<!DOCTYPE|<html|<head|<body"
+            if ($isHtml) {
+                Write-AuditLog "Skipping LDAP injection auth test - response is HTML, not API" -Level Debug
+                continue
+            }
+
+            # Check for LDAP error messages in actual API response
+            if ($responseBody -match "LDAP|ldap|directory|DN=|distinguished name") {
                 Add-Finding -Category "Injection" `
                     -CISControl "INJ1" `
                     -Finding "Potential LDAP injection - LDAP error disclosed" `
-                    -Resource "/PasswordVault/api/auth/logon" `
+                    -Resource "$PVWA/PasswordVault/api/auth/logon" `
                     -CurrentValue "LDAP-related error message returned" `
                     -ExpectedValue "Generic authentication error" `
                     -Recommendation "Sanitize LDAP special characters in auth inputs" `
@@ -6475,12 +7364,26 @@ function Test-CyberArkSpecificIssues {
             $response = Invoke-WebRequest -Uri "$PVWA$endpoint" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200) {
+                $content = $response.Content
+
+                # Skip if this is a catch-all login page (false positive)
+                if (Test-IsBaselineResponse -ResponseContent $content) {
+                    Write-AuditLog "Skipping CCP endpoint $endpoint - response matches baseline catch-all page" -Level Debug
+                    continue
+                }
+
+                # Skip HTML responses (login page redirect)
+                if ($content -match "<!DOCTYPE|<html|<head|<body") {
+                    Write-AuditLog "Skipping CCP endpoint $endpoint - response is HTML, not API" -Level Debug
+                    continue
+                }
+
                 # Check if actual credential data returned vs error
-                if ($response.Content -notmatch "error|Error|unauthorized|Unauthorized" -and $response.Content.Length -gt 50) {
+                if ($content -notmatch "error|Error|unauthorized|Unauthorized" -and $content.Length -gt 50) {
                     Add-Finding -Category "CyberArk Security" `
                         -CISControl "CA1" `
                         -Finding "CCP endpoint accessible without authentication" `
-                        -Resource $endpoint `
+                        -Resource "$PVWA$endpoint" `
                         -CurrentValue "CCP returns data without credentials" `
                         -ExpectedValue "CCP requires application authentication" `
                         -Recommendation "Configure CCP with client certificate or IP restrictions" `
@@ -6515,8 +7418,15 @@ function Test-CyberArkSpecificIssues {
             if ($response.StatusCode -eq 200) {
                 $content = $response.Content
 
+                # Skip if this is a catch-all login page (false positive)
+                if (Test-IsBaselineResponse -ResponseContent $content) {
+                    Write-AuditLog "Skipping internal endpoint $endpoint - response matches baseline catch-all page" -Level Debug
+                    continue
+                }
+
                 # Skip login pages and error responses
                 if ($content -match "<!DOCTYPE|<html|login|Login|Sign in" -and $content -notmatch '"[Ss]afes"|"[Aa]ccounts"|"[Pp]latforms"') {
+                    Write-AuditLog "Skipping internal endpoint $endpoint - response is HTML/login page" -Level Debug
                     continue
                 }
 
@@ -6524,7 +7434,7 @@ function Test-CyberArkSpecificIssues {
                     Add-Finding -Category "CyberArk Security" `
                         -CISControl "CA2" `
                         -Finding "Internal PVWA endpoint accessible without auth" `
-                        -Resource $endpoint `
+                        -Resource "$PVWA$endpoint" `
                         -CurrentValue "Endpoint returns sensitive data ($($content.Length) bytes)" `
                         -ExpectedValue "Requires authentication" `
                         -Recommendation "Ensure all API endpoints require authentication" `
@@ -6602,11 +7512,30 @@ function Test-CyberArkSpecificIssues {
             $response = Invoke-WebRequest -Uri "$PVWA$path" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
 
             if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) {
-                if ($response.Content -match "\.cred|Password|Credential|vault|VAULT") {
+                $body = $response.Content
+
+                # First check if this is a soft-404/login page (common false positive)
+                if (Test-IsSoft404Response -ResponseContent $body) {
+                    Write-AuditLog "Skipping $path - detected soft 404/login page" -Level Debug
+                    continue
+                }
+
+                # Also check if response matches baseline (catch-all SPA page)
+                if (Test-IsBaselineResponse -ResponseContent $body) {
+                    Write-AuditLog "Skipping $path - response matches baseline catch-all page" -Level Debug
+                    continue
+                }
+
+                # Check for actual credential file content (not HTML login page patterns)
+                # Must NOT be HTML and MUST contain credential-related content
+                $isHtml = $body -match "<!DOCTYPE|<html|<head|<body"
+                $hasCredContent = $body -match "\.cred|vault\.ini|\[Vault\]|Password=|Credential|VaultIPAddress"
+
+                if (-not $isHtml -and $hasCredContent) {
                     Add-Finding -Category "CyberArk Security" `
                         -CISControl "CA5" `
                         -Finding "Credential file path accessible: $path" `
-                        -Resource $path `
+                        -Resource "$PVWA$path" `
                         -CurrentValue "Path returns content" `
                         -ExpectedValue "Path not accessible via web" `
                         -Recommendation "Remove web access to credential file directories" `
@@ -6686,7 +7615,7 @@ function Test-CA25Bulletins {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CA25-32" `
                     -Finding "CCP endpoint accessible without authentication (CA25-32 risk)" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Endpoint responds to unauthenticated requests ($($body.Length) bytes)" `
                     -ExpectedValue "Proper authentication required" `
                     -Recommendation "Apply patches for CA25-32 and ensure CCP requires authentication" `
@@ -6719,7 +7648,7 @@ function Test-CA25Bulletins {
                 Add-Finding -Category "CVE Assessment" `
                     -CISControl "CA25-34" `
                     -Finding "HTML5 Gateway endpoint detected (CA25-34 - verify patched)" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "HTML5 Gateway accessible ($($body.Length) bytes)" `
                     -ExpectedValue "Patched version 14.6 or later" `
                     -Recommendation "Verify HTML5 Gateway is patched for CA25-34 DoS vulnerability" `
@@ -6802,14 +7731,27 @@ function Test-BOLA {
 
                 # Check for soft 404 responses
                 if (Test-IsSoft404Response -ResponseContent $body) {
-                    Write-AuditLog "Skipping $endpoint - detected soft 404 page" -Level Debug
+                    Write-AuditLog "Skipping $endpoint - detected soft 404/login page" -Level Debug
+                    continue
+                }
+
+                # Check for baseline catch-all response
+                if (Test-IsBaselineResponse -ResponseContent $body) {
+                    Write-AuditLog "Skipping $endpoint - response matches baseline catch-all page" -Level Debug
+                    continue
+                }
+
+                # Must be actual API response (JSON), not HTML
+                $isHtml = $body -match "<!DOCTYPE|<html|<head|<body"
+                if ($isHtml) {
+                    Write-AuditLog "Skipping $endpoint - response is HTML, not API" -Level Debug
                     continue
                 }
 
                 Add-Finding -Category "API Security" `
                     -CISControl "API3" `
                     -Finding "Potential BOLA/IDOR vulnerability" `
-                    -Resource $endpoint `
+                    -Resource "$PVWA$endpoint" `
                     -CurrentValue "Resource accessible without authentication ($($body.Length) bytes)" `
                     -ExpectedValue "401/403 Unauthorized" `
                     -Recommendation "Implement proper authorization checks" `
@@ -6831,15 +7773,33 @@ function Test-MassAssignment {
 
     foreach ($payload in $massAssignmentPayloads) {
         try {
-            $body = $payload.Body | ConvertTo-Json
-            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Endpoint)" -Method $payload.Method -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $jsonBody = $payload.Body | ConvertTo-Json
+            $response = Invoke-WebRequest -Uri "$PVWA$($payload.Endpoint)" -Method $payload.Method -Body $jsonBody -ContentType "application/json" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $responseBody = $response.Content
 
-            # If we get anything other than 401/403, flag it
+            # Check for false positives - if it's a login page or baseline response, skip
+            if (Test-IsSoft404Response -ResponseContent $responseBody) {
+                Write-AuditLog "Skipping mass assignment test $($payload.Endpoint) - detected soft 404/login page" -Level Debug
+                continue
+            }
+            if (Test-IsBaselineResponse -ResponseContent $responseBody) {
+                Write-AuditLog "Skipping mass assignment test $($payload.Endpoint) - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
+            # Must be actual API response (JSON), not HTML
+            $isHtml = $responseBody -match "<!DOCTYPE|<html|<head|<body"
+            if ($isHtml) {
+                Write-AuditLog "Skipping mass assignment test $($payload.Endpoint) - response is HTML, not API" -Level Debug
+                continue
+            }
+
+            # If we get anything other than 401/403, flag it (and it's a real API response)
             if ($response.StatusCode -notin @(401, 403, 400)) {
                 Add-Finding -Category "API Security" `
                     -CISControl "API4" `
                     -Finding "Potential mass assignment vulnerability" `
-                    -Resource $payload.Endpoint `
+                    -Resource "$PVWA$($payload.Endpoint)" `
                     -CurrentValue "Privileged properties accepted" `
                     -ExpectedValue "Privileged properties rejected" `
                     -Recommendation "Implement strict input validation and property whitelisting" `
@@ -6864,13 +7824,31 @@ function Test-APIInjection {
     foreach ($payload in $sqlInjectionPayloads) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            # Check for SQL error messages
-            if ($response.Content -match "SQL|syntax|mysql|oracle|postgresql|sqlite|exception|error") {
+            # Check for false positives - if it's a login page or baseline response, skip
+            if (Test-IsSoft404Response -ResponseContent $body) {
+                Write-AuditLog "Skipping SQL injection test $payload - detected soft 404/login page" -Level Debug
+                continue
+            }
+            if (Test-IsBaselineResponse -ResponseContent $body) {
+                Write-AuditLog "Skipping SQL injection test $payload - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
+            # Must be actual API response (JSON), not HTML
+            $isHtml = $body -match "<!DOCTYPE|<html|<head|<body"
+            if ($isHtml) {
+                Write-AuditLog "Skipping SQL injection test $payload - response is HTML, not API" -Level Debug
+                continue
+            }
+
+            # Check for SQL error messages in actual API response
+            if ($body -match "SQL|syntax|mysql|oracle|postgresql|sqlite") {
                 Add-Finding -Category "API Security" `
                     -CISControl "API2" `
                     -Finding "Potential SQL injection vulnerability" `
-                    -Resource $payload `
+                    -Resource "$PVWA$payload" `
                     -CurrentValue "SQL error/syntax message in response" `
                     -ExpectedValue "Generic error message" `
                     -Recommendation "Use parameterized queries and input validation" `
@@ -6878,23 +7856,27 @@ function Test-APIInjection {
             }
         }
         catch {
-            $errorResponse = $_.Exception.Response
-            if ($errorResponse) {
+            # PS7 compatible error body access
+            $errorBody = $_.ErrorDetails.Message
+            if (-not $errorBody -and $_.Exception.Response) {
                 try {
-                    $reader = New-Object System.IO.StreamReader($errorResponse.GetResponseStream())
-                    $errorBody = $reader.ReadToEnd()
-                    if ($errorBody -match "SQL|syntax|mysql|oracle") {
-                        Add-Finding -Category "API Security" `
-                            -CISControl "API2" `
-                            -Finding "SQL injection error disclosure" `
-                            -Resource $payload `
-                            -CurrentValue "SQL error in error response" `
-                            -ExpectedValue "Generic error" `
-                            -Recommendation "Implement proper error handling" `
-                            -Severity "Critical"
+                    if ($_.Exception.Response.Content) {
+                        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
                     }
                 }
                 catch { }
+            }
+
+            # Check error body is not HTML catch-all page
+            if ($errorBody -and $errorBody -notmatch "<!DOCTYPE|<html" -and $errorBody -match "SQL|syntax|mysql|oracle") {
+                Add-Finding -Category "API Security" `
+                    -CISControl "API2" `
+                    -Finding "SQL injection error disclosure" `
+                    -Resource "$PVWA$payload" `
+                    -CurrentValue "SQL error in error response" `
+                    -ExpectedValue "Generic error" `
+                    -Recommendation "Implement proper error handling" `
+                    -Severity "Critical"
             }
         }
     }
@@ -6908,12 +7890,30 @@ function Test-APIInjection {
     foreach ($payload in $ldapInjectionPayloads) {
         try {
             $response = Invoke-WebRequest -Uri "$PVWA$payload" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            $body = $response.Content
 
-            if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 100) {
+            # Check for false positives
+            if (Test-IsSoft404Response -ResponseContent $body) {
+                Write-AuditLog "Skipping LDAP injection test $payload - detected soft 404/login page" -Level Debug
+                continue
+            }
+            if (Test-IsBaselineResponse -ResponseContent $body) {
+                Write-AuditLog "Skipping LDAP injection test $payload - response matches baseline catch-all page" -Level Debug
+                continue
+            }
+
+            # Must be actual API response (JSON), not HTML
+            $isHtml = $body -match "<!DOCTYPE|<html|<head|<body"
+            if ($isHtml) {
+                Write-AuditLog "Skipping LDAP injection test $payload - response is HTML, not API" -Level Debug
+                continue
+            }
+
+            if ($response.StatusCode -eq 200 -and $body.Length -gt 100) {
                 Add-Finding -Category "API Security" `
                     -CISControl "API2" `
                     -Finding "Potential LDAP injection vulnerability" `
-                    -Resource $payload `
+                    -Resource "$PVWA$payload" `
                     -CurrentValue "LDAP query accepted malformed input" `
                     -ExpectedValue "Input validation error" `
                     -Recommendation "Implement LDAP input sanitization" `
@@ -7444,17 +8444,33 @@ function Test-ComponentVersions {
         }
 
         # Check via API
-        $serverInfo = Invoke-RestMethod -Uri "$PVWA/PasswordVault/api/server" -Method GET -TimeoutSec 10 -ErrorAction SilentlyContinue
+        try {
+            $response = Invoke-WebRequest -Uri "$PVWA/PasswordVault/api/server" -Method GET -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+            $body = $response.Content
 
-        if ($serverInfo) {
-            Add-Finding -Category "Version Detection" `
-                -CISControl "BB2" `
-                -Finding "Server information endpoint accessible" `
-                -Resource "/api/server" `
-                -CurrentValue "Server info disclosed" `
-                -ExpectedValue "Endpoint restricted" `
-                -Recommendation "Restrict access to server information endpoint" `
-                -Severity "Medium"
+            # Skip if this is a baseline catch-all response (false positive)
+            if (Test-IsBaselineResponse -ResponseContent $body) {
+                Write-AuditLog "Skipping /api/server - response matches baseline catch-all page" -Level Debug
+            }
+            # Skip if this is an HTML error page (CloudFront error, login page, etc.)
+            elseif ($body -match "<!DOCTYPE|<html|<head|<body|502 ERROR|CloudFront|Lambda function") {
+                Write-AuditLog "Skipping /api/server - response is HTML error page" -Level Debug
+            }
+            # Only flag if response contains actual server info (JSON with server properties)
+            elseif ($body -match '"ServerID"|"ServerName"|"ServerId"|"Version"|"ApplicationName"' -and $body -match '^\s*\{') {
+                Add-Finding -Category "Version Detection" `
+                    -CISControl "BB2" `
+                    -Finding "Server information endpoint accessible" `
+                    -Resource "$PVWA/PasswordVault/api/server" `
+                    -CurrentValue "Server info disclosed" `
+                    -ExpectedValue "Endpoint restricted" `
+                    -Recommendation "Restrict access to server information endpoint" `
+                    -Severity "Medium"
+            }
+        }
+        catch {
+            # Expected - endpoint not accessible (401, 403, 404, 502, etc.)
+            Write-AuditLog "Server info endpoint not accessible: $($_.Exception.Message)" -Level Debug
         }
     }
     catch { }
@@ -15815,7 +16831,7 @@ function New-HTMLReport {
                     Click on any finding row to expand and view detailed information including evidence, remediation steps, and business impact analysis.
                 </p>
                 <div class="filter-controls">
-                    <button class="filter-btn active" style="background: #2d3436; color: white;" onclick="filterFindings('all')">All ($($script:Findings | Where-Object { $_.Status -eq "Fail" }).Count)</button>
+                    <button class="filter-btn active" style="background: #2d3436; color: white;" onclick="filterFindings('all')">All ($(@($script:Findings | Where-Object { $_.Status -eq "Fail" }).Count))</button>
                     <button class="filter-btn" style="background: #ffebee;" onclick="filterFindings('Critical')">Critical ($criticalCount)</button>
                     <button class="filter-btn" style="background: #fff3e0;" onclick="filterFindings('High')">High ($highCount)</button>
                     <button class="filter-btn" style="background: #fffde7;" onclick="filterFindings('Medium')">Medium ($mediumCount)</button>
@@ -15882,6 +16898,23 @@ function New-HTMLReport {
 
 Technical Details: $($finding.TechnicalDetails)</div>
                                 </div>
+                                $(if ($finding.HasPoC) {
+                                    @"
+                                <div style="margin-top: 15px;">
+                                    <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Proof of Concept (Request/Response)</label>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                                        <div>
+                                            <label style="font-size: 0.7em; color: #e17055; font-weight: bold;">REQUEST</label>
+                                            <pre style="background: #2d3436; color: #00b894; padding: 15px; border-radius: 5px; font-size: 0.8em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto;">$([System.Web.HttpUtility]::HtmlEncode($finding.PoCRequest))</pre>
+                                        </div>
+                                        <div>
+                                            <label style="font-size: 0.7em; color: #0984e3; font-weight: bold;">RESPONSE</label>
+                                            <pre style="background: #2d3436; color: #74b9ff; padding: 15px; border-radius: 5px; font-size: 0.8em; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto;">$([System.Web.HttpUtility]::HtmlEncode($finding.PoCResponse))</pre>
+                                        </div>
+                                    </div>
+                                </div>
+"@
+                                })
                                 <div style="margin-top: 15px;">
                                     <label style="font-size: 0.75em; text-transform: uppercase; color: #636e72;">Risk Description</label>
                                     <p style="margin-top: 5px;">$($finding.RiskDescription)</p>
@@ -16858,72 +17891,116 @@ function Start-Audit {
     $script:SafesWithAccounts = @{}
     $script:IsAuthenticated = $false
 
+    # Establish baseline response for false positive detection
+    # This helps identify catch-all SPA responses that return the same page for any URL
+    try {
+        Initialize-BaselineResponse -BaseUrl $PVWA
+    }
+    catch {
+        Write-AuditLog "Could not establish baseline response: $($_.Exception.Message)" -Level Warning
+    }
+
+    # Handle "Only" execution flags - when set, skip all other check categories
+    $script:RunOnlyMode = $OnlyPortScan -or $OnlyCVEChecks -or $OnlyAuthenticatedChecks -or $OnlyNetworkChecks -or $OnlyBlackboxChecks
+
+    if ($script:RunOnlyMode) {
+        Write-Host ""
+        Write-Host "+============================================================+" -ForegroundColor Cyan
+        Write-Host "|  SELECTIVE EXECUTION MODE                                 |" -ForegroundColor Cyan
+        if ($OnlyPortScan) { Write-Host "|  Running ONLY: Port Scanning                              |" -ForegroundColor Cyan }
+        if ($OnlyCVEChecks) { Write-Host "|  Running ONLY: CVE Vulnerability Checks                  |" -ForegroundColor Cyan }
+        if ($OnlyAuthenticatedChecks) { Write-Host "|  Running ONLY: Authenticated API Checks                  |" -ForegroundColor Cyan }
+        if ($OnlyNetworkChecks) { Write-Host "|  Running ONLY: Network Security Checks                   |" -ForegroundColor Cyan }
+        if ($OnlyBlackboxChecks) { Write-Host "|  Running ONLY: Unauthenticated Blackbox Checks           |" -ForegroundColor Cyan }
+        Write-Host "+============================================================+" -ForegroundColor Cyan
+    }
+
     #======================================================================
     # PHASE 1: UNAUTHENTICATED CHECKS (No credentials required)
     #======================================================================
-    Write-Host ""
-    Write-Host "+============================================================+" -ForegroundColor Magenta
-    Write-Host "|  PHASE 1: UNAUTHENTICATED SECURITY CHECKS                |" -ForegroundColor Magenta
-    Write-Host "|  (No credentials required - External/Blackbox testing)   |" -ForegroundColor Magenta
-    Write-Host "+============================================================+" -ForegroundColor Magenta
 
-    Write-Host ""
-    Write-Host "[UNAUTH] Running Network Security Checks..." -ForegroundColor Yellow
-    Write-Host "============================================" -ForegroundColor Yellow
-
-    if (-not $SkipPortScan) {
-        try { Test-PortScan } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET1" -CheckName "Port Scan" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-        try { Test-VaultPortSecurity } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET2" -CheckName "Vault Port Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+    # Skip Phase 1 if OnlyAuthenticatedChecks is set
+    if ($OnlyAuthenticatedChecks) {
+        Write-Host ""
+        Write-Host "+============================================================+" -ForegroundColor DarkGray
+        Write-Host "|  PHASE 1: UNAUTHENTICATED SECURITY CHECKS (SKIPPED)       |" -ForegroundColor DarkGray
+        Write-Host "|  (Skipped via -OnlyAuthenticatedChecks parameter)          |" -ForegroundColor DarkGray
+        Write-Host "+============================================================+" -ForegroundColor DarkGray
     }
     else {
-        Add-SkippedCheck -Category "Network Security" -CISControl "NET1" `
-            -CheckName "Port Scan" `
-            -Reason "Skipped via -SkipPortScan parameter" `
-            -Type "Skipped"
-        Add-SkippedCheck -Category "Network Security" -CISControl "NET2" `
-            -CheckName "Vault Port Security Check" `
-            -Reason "Skipped via -SkipPortScan parameter" `
-            -Type "Skipped"
-    }
-    try { Test-CipherSuites } catch { Add-SkippedCheck -Category "TLS Security" -CISControl "TLS1" -CheckName "Cipher Suite Check" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-DNSSecurity } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET7" -CheckName "DNS Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        Write-Host ""
+        Write-Host "+============================================================+" -ForegroundColor Magenta
+        Write-Host "|  PHASE 1: UNAUTHENTICATED SECURITY CHECKS                |" -ForegroundColor Magenta
+        Write-Host "|  (No credentials required - External/Blackbox testing)   |" -ForegroundColor Magenta
+        Write-Host "+============================================================+" -ForegroundColor Magenta
 
-    Write-Host ""
-    Write-Host "[UNAUTH] Running TLS/SSL Security Checks..." -ForegroundColor Yellow
-    Write-Host "============================================" -ForegroundColor Yellow
+        # Network Security Checks (Port Scan, TLS, DNS)
+        $runNetworkChecks = (-not $script:RunOnlyMode) -or $OnlyPortScan -or $OnlyNetworkChecks
+        if ($runNetworkChecks) {
+            Write-Host ""
+            Write-Host "[UNAUTH] Running Network Security Checks..." -ForegroundColor Yellow
+            Write-Host "============================================" -ForegroundColor Yellow
 
-    try { Test-TLSConfiguration } catch { Add-SkippedCheck -Category "Transport Security" -CISControl "8.1" -CheckName "TLS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-CertificateIssues } catch { Add-SkippedCheck -Category "Certificate" -CISControl "BB9" -CheckName "Certificate Check" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            if (-not $SkipPortScan) {
+                try { Test-PortScan } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET1" -CheckName "Port Scan" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+                try { Test-VaultPortSecurity } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET2" -CheckName "Vault Port Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            }
+            else {
+                Add-SkippedCheck -Category "Network Security" -CISControl "NET1" `
+                    -CheckName "Port Scan" `
+                    -Reason "Skipped via -SkipPortScan parameter" `
+                    -Type "Skipped"
+                Add-SkippedCheck -Category "Network Security" -CISControl "NET2" `
+                    -CheckName "Vault Port Security Check" `
+                    -Reason "Skipped via -SkipPortScan parameter" `
+                    -Type "Skipped"
+            }
+            try { Test-CipherSuites } catch { Add-SkippedCheck -Category "TLS Security" -CISControl "TLS1" -CheckName "Cipher Suite Check" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-DNSSecurity } catch { Add-SkippedCheck -Category "Network Security" -CISControl "NET7" -CheckName "DNS Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
 
-    Write-Host ""
-    Write-Host "[UNAUTH] Running Blackbox Security Checks..." -ForegroundColor Yellow
-    Write-Host "=============================================" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "[UNAUTH] Running TLS/SSL Security Checks..." -ForegroundColor Yellow
+            Write-Host "============================================" -ForegroundColor Yellow
 
-    try { Test-ExposedEndpoints } catch { Add-SkippedCheck -Category "Exposed Endpoints" -CISControl "BB1" -CheckName "Exposed Endpoints" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-InformationDisclosure } catch { Add-SkippedCheck -Category "Information Disclosure" -CISControl "BB2" -CheckName "Information Disclosure" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    if (-not $SkipDefaultCredentialTests -and -not $script:SkipDefaultCredentialTests) {
-        try { Test-DefaultCredentials } catch { Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    } else {
-        Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Skipped by user request (-SkipDefaultCredentialTests or -OPSECMode)" -Type "Skipped"
-    }
-    try { Test-HTTPMethods } catch { Add-SkippedCheck -Category "HTTP Methods" -CISControl "BB4" -CheckName "HTTP Methods" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-CookieSecurity } catch { Add-SkippedCheck -Category "Cookie Security" -CISControl "BB5" -CheckName "Cookie Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-CORSConfiguration } catch { Add-SkippedCheck -Category "CORS Configuration" -CISControl "BB6" -CheckName "CORS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-BackupAndConfigFiles } catch { Add-SkippedCheck -Category "Exposed Files" -CISControl "BB7" -CheckName "Backup/Config Files" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-DirectoryListing } catch { Add-SkippedCheck -Category "Directory Listing" -CISControl "BB8" -CheckName "Directory Listing" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-RateLimiting } catch { Add-SkippedCheck -Category "Rate Limiting" -CISControl "BB10" -CheckName "Rate Limiting" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-KnownVulnerabilities } catch { Add-SkippedCheck -Category "Known Vulnerabilities" -CISControl "BB11" -CheckName "Known Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-TLSConfiguration } catch { Add-SkippedCheck -Category "Transport Security" -CISControl "8.1" -CheckName "TLS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-CertificateIssues } catch { Add-SkippedCheck -Category "Certificate" -CISControl "BB9" -CheckName "Certificate Check" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        }
 
-    Write-Host ""
-    Write-Host "[UNAUTH] Running PVWA Web Security Checks..." -ForegroundColor Yellow
-    Write-Host "=============================================" -ForegroundColor Yellow
+        # Blackbox Security Checks
+        $runBlackboxChecks = (-not $script:RunOnlyMode) -or $OnlyBlackboxChecks
+        if ($runBlackboxChecks) {
+            Write-Host ""
+            Write-Host "[UNAUTH] Running Blackbox Security Checks..." -ForegroundColor Yellow
+            Write-Host "=============================================" -ForegroundColor Yellow
 
-    try { Test-PVWASecurity } catch { Add-SkippedCheck -Category "PVWA Security" -CISControl "V7.1" -CheckName "PVWA Security Headers" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-SessionSecurity } catch { Add-SkippedCheck -Category "Session Security" -CISControl "V7.2" -CheckName "Session Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-HeaderInjection } catch { Add-SkippedCheck -Category "Header Security" -CISControl "V7.1" -CheckName "Header Injection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
-    try { Test-XXEVulnerability } catch { Add-SkippedCheck -Category "XXE Vulnerability" -CISControl "API2" -CheckName "XXE Vulnerability" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-ExposedEndpoints } catch { Add-SkippedCheck -Category "Exposed Endpoints" -CISControl "BB1" -CheckName "Exposed Endpoints" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-InformationDisclosure } catch { Add-SkippedCheck -Category "Information Disclosure" -CISControl "BB2" -CheckName "Information Disclosure" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            if (-not $SkipDefaultCredentialTests -and -not $script:SkipDefaultCredentialTests) {
+                try { Test-DefaultCredentials } catch { Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            } else {
+                Add-SkippedCheck -Category "Default Credentials" -CISControl "BB3" -CheckName "Default Credentials" -Reason "Skipped by user request (-SkipDefaultCredentialTests or -OPSECMode)" -Type "Skipped"
+            }
+            try { Test-HTTPMethods } catch { Add-SkippedCheck -Category "HTTP Methods" -CISControl "BB4" -CheckName "HTTP Methods" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-CookieSecurity } catch { Add-SkippedCheck -Category "Cookie Security" -CISControl "BB5" -CheckName "Cookie Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-CORSConfiguration } catch { Add-SkippedCheck -Category "CORS Configuration" -CISControl "BB6" -CheckName "CORS Configuration" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-BackupAndConfigFiles } catch { Add-SkippedCheck -Category "Exposed Files" -CISControl "BB7" -CheckName "Backup/Config Files" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-DirectoryListing } catch { Add-SkippedCheck -Category "Directory Listing" -CISControl "BB8" -CheckName "Directory Listing" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-RateLimiting } catch { Add-SkippedCheck -Category "Rate Limiting" -CISControl "BB10" -CheckName "Rate Limiting" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-KnownVulnerabilities } catch { Add-SkippedCheck -Category "Known Vulnerabilities" -CISControl "BB11" -CheckName "Known Vulnerabilities" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
 
-    if (-not $SkipCVEChecks) {
+            Write-Host ""
+            Write-Host "[UNAUTH] Running PVWA Web Security Checks..." -ForegroundColor Yellow
+            Write-Host "=============================================" -ForegroundColor Yellow
+
+            try { Test-PVWASecurity } catch { Add-SkippedCheck -Category "PVWA Security" -CISControl "V7.1" -CheckName "PVWA Security Headers" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-SessionSecurity } catch { Add-SkippedCheck -Category "Session Security" -CISControl "V7.2" -CheckName "Session Security" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-HeaderInjection } catch { Add-SkippedCheck -Category "Header Security" -CISControl "V7.1" -CheckName "Header Injection" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-XXEVulnerability } catch { Add-SkippedCheck -Category "XXE Vulnerability" -CISControl "API2" -CheckName "XXE Vulnerability" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        }
+
+        # CVE-Specific Vulnerability Checks
+        $runCVEChecks = ((-not $script:RunOnlyMode) -or $OnlyCVEChecks) -and (-not $SkipCVEChecks)
+        if ($runCVEChecks) {
         Write-Host ""
         Write-Host "[UNAUTH] Running CVE-Specific Vulnerability Checks..." -ForegroundColor Yellow
         Write-Host "======================================================" -ForegroundColor Yellow
@@ -16985,14 +18062,16 @@ function Start-Audit {
             -Type "Skipped"
     }
 
-    if (-not $SkipAPITests) {
+    # API Security Checks - skip if OnlyPortScan or OnlyNetworkChecks
+    $runAPIChecks = (-not $SkipAPITests) -and (-not $OnlyPortScan) -and (-not $OnlyNetworkChecks)
+    if ($runAPIChecks) {
         Write-Host ""
         Write-Host "[UNAUTH] Running API Security Checks (Unauthenticated)..." -ForegroundColor Yellow
         Write-Host "==========================================================" -ForegroundColor Yellow
 
         try { Test-APISecurity } catch { Add-SkippedCheck -Category "API Security" -CISControl "API1" -CheckName "API Security Tests" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
     }
-    else {
+    elseif ($SkipAPITests -or $OnlyPortScan -or $OnlyNetworkChecks) {
         Add-SkippedCheck -Category "API Security" -CISControl "API1" `
             -CheckName "API Authentication Bypass" `
             -Reason "Skipped via -SkipAPITests parameter" `
@@ -17027,19 +18106,34 @@ function Start-Audit {
         }
     }
 
-    Write-Host ""
-    Write-Host "[UNAUTH] Running Component Version Detection..." -ForegroundColor Yellow
-    Write-Host "================================================" -ForegroundColor Yellow
+        # Component Version Detection - skip if OnlyPortScan or OnlyNetworkChecks
+        if (-not $OnlyPortScan -and -not $OnlyNetworkChecks) {
+            Write-Host ""
+            Write-Host "[UNAUTH] Running Component Version Detection..." -ForegroundColor Yellow
+            Write-Host "================================================" -ForegroundColor Yellow
 
-    try { Test-ComponentVersions } catch { Add-SkippedCheck -Category "Version Detection" -CISControl "BB2" -CheckName "Component Versions" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+            try { Test-ComponentVersions } catch { Add-SkippedCheck -Category "Version Detection" -CISControl "BB2" -CheckName "Component Versions" -Reason "Error: $($_.Exception.Message)" -Type "Error" }
+        }
 
-    Write-Host ""
-    Write-AuditLog "Phase 1 (Unauthenticated) checks complete." -Level Success
+        Write-Host ""
+        Write-AuditLog "Phase 1 (Unauthenticated) checks complete." -Level Success
+    } # End of Phase 1 else block (not OnlyAuthenticatedChecks)
 
     #======================================================================
     # PHASE 2: AUTHENTICATED CHECKS (CyberArk API credentials required)
     #======================================================================
-    if ($UnauthenticatedOnly) {
+
+    # Skip Phase 2 if any "Only" mode that doesn't include authenticated checks
+    $skipPhase2ForOnlyMode = $OnlyPortScan -or $OnlyCVEChecks -or $OnlyNetworkChecks -or $OnlyBlackboxChecks
+
+    if ($skipPhase2ForOnlyMode) {
+        Write-Host ""
+        Write-Host "+============================================================+" -ForegroundColor DarkGray
+        Write-Host "|  PHASE 2: AUTHENTICATED SECURITY CHECKS (SKIPPED)         |" -ForegroundColor DarkGray
+        Write-Host "|  (Skipped - selective execution mode excludes auth checks) |" -ForegroundColor DarkGray
+        Write-Host "+============================================================+" -ForegroundColor DarkGray
+    }
+    elseif ($UnauthenticatedOnly) {
         Write-Host ""
         Write-Host "+============================================================+" -ForegroundColor DarkGray
         Write-Host "+============================================================+" -ForegroundColor DarkGray

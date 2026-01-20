@@ -2,7 +2,7 @@
 
 A comprehensive PowerShell-based security assessment tool for CyberArk Privileged Access Management (PAM) platforms. **Designed for offensive security professionals, red teamers, and penetration testers.**
 
-**Version 4.4** - This tool is designed to run **REMOTELY** against CyberArk servers via network. It does NOT need to be executed on the CyberArk servers themselves. All checks are performed over the network using PVWA API, port scanning, and web testing.
+This tool is designed to run **REMOTELY** against CyberArk servers via network. It does NOT need to be executed on the CyberArk servers themselves. All checks are performed over the network using PVWA API, port scanning, and web testing.
 
 This tool performs security checks including CIS Benchmark compliance, vendor best practices, blackbox testing, network security analysis, CVE-specific vulnerability checks (including 2025 CVEs), machine identity security, secrets management, zero standing privileges (ZSP) assessment, identity governance, and enhanced security checks.
 
@@ -22,6 +22,9 @@ This tool performs security checks including CIS Benchmark compliance, vendor be
 | **Quiet Mode** | Reduced console output for automation and scripting |
 | **Credential Security** | Secure handling with memory cleanup after use |
 | **Comprehensive Reporting** | HTML dashboard, 7 CSV files, and structured JSON for programmatic use |
+| **PoC Evidence** | Request/Response proof-of-concept included in HTML report for penetration testing |
+| **Selective Execution** | Run only specific check categories (portscan, CVE, blackbox, authenticated, network) |
+| **False Positive Reduction** | Baseline fingerprinting to eliminate SPA catch-all false positives |
 
 ## Table of Contents
 
@@ -653,6 +656,27 @@ $cred = Get-Credential
     -SkipCloudChecks
 ```
 
+### Run ONLY Specific Check Categories
+
+Use `-Only*` parameters to run specific check categories exclusively:
+
+```powershell
+# Run ONLY port scanning
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyPortScan
+
+# Run ONLY CVE vulnerability checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyCVEChecks
+
+# Run ONLY network security checks (ports, TLS, DNS)
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyNetworkChecks
+
+# Run ONLY unauthenticated blackbox checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyBlackboxChecks
+
+# Run ONLY authenticated API checks
+.\CyberArk-Security-Audit.ps1 -PVWA "https://pvwa.domain.com" -OnlyAuthenticatedChecks -Credential $cred
+```
+
 ### Full Options Example
 
 ```powershell
@@ -913,6 +937,12 @@ C:\SecurityReports\CyberArk\
 | UnauthenticatedOnly | No | False | Run only Phase 1 (no credentials needed) |
 | IncludeEPMChecks | No | False | Include EPM integration checks |
 | ComplianceMapping | No | False | Generate compliance framework mapping |
+| **Selective Execution** | | | |
+| OnlyPortScan | No | False | Run ONLY port scanning checks |
+| OnlyCVEChecks | No | False | Run ONLY CVE vulnerability checks |
+| OnlyAuthenticatedChecks | No | False | Run ONLY authenticated API checks |
+| OnlyNetworkChecks | No | False | Run ONLY network security checks (TLS, ports, DNS) |
+| OnlyBlackboxChecks | No | False | Run ONLY unauthenticated blackbox checks |
 | **CyberArk Tools Parameters** | | | |
 | IncludeADChecks | No | False | Enable Active Directory security checks (zBang-inspired) |
 | IncludeConjurChecks | No | False | Enable Conjur/Secrets Manager integration checks |
@@ -986,6 +1016,7 @@ A modern, interactive HTML report with:
 - **CIS Benchmark Compliance Matrix**: Control-by-control compliance status
 - **Detailed Findings Table**: Expandable rows with full evidence and remediation steps
   - Click any finding to reveal: evidence, technical details, risk description, business impact, CVSS score, remediation steps, and references
+  - **Proof of Concept (PoC)**: Request/Response evidence for penetration testing reports (when available)
 - **Remediation Roadmap**: Prioritized timeline (24h/1wk/30d/90d)
 - **Component Analysis**: Findings grouped by CyberArk component (Vault, CPM, PSM, PVWA, PTA)
 - **Skipped Checks**: Manual verification requirements with follow-up guidance
@@ -1057,6 +1088,8 @@ Each finding now includes comprehensive information for report writing:
 | `RemediationSteps` | Step-by-step remediation guidance |
 | `ComplianceRefs` | Compliance framework references |
 | `References` | Documentation links |
+| `PoCRequest` | HTTP request proof-of-concept (when available) |
+| `PoCResponse` | HTTP response proof-of-concept (when available) |
 
 ### Risk Scoring
 
