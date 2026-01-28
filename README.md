@@ -1270,6 +1270,6 @@ If you encounter issues not covered above:
 - [ACLight](https://github.com/cyberark/ACLight) - Shadow Admin discovery (part of zBang)
 - [Ansible Security Automation Collection](https://github.com/cyberark/ansible-security-automation-collection) - CyberArk Ansible integration
 
-## License
+## License.
 
 This tool is provided as-is for security assessment purposes. Use responsibly and ethically.
